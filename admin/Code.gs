@@ -1,7 +1,14 @@
 /**
- * Web app entry point. All auth happens here before any Campaign.gs function
- * is reachable — appsscript.json's DOMAIN access setting is the outer gate,
- * ADMIN_ALLOWLIST (shared/Config.gs) is defence in depth per docs/ARCHITECTURE.md §2.
+ * Web app entry point. All real authorization happens HERE, in code — not in
+ * appsscript.json's `access` setting. That setting is "ANYONE" (any Google
+ * account, not "DOMAIN") deliberately: a DOMAIN-restricted deployment rejects
+ * server-to-server Bearer-token calls at Google's front door before the
+ * script ever runs, which breaks the agent-to-admin call in
+ * agent/CentralClient.gs even for a same-domain, same-person token. Since
+ * executeAs is USER_ACCESSING, Session.getActiveUser() still reflects the
+ * real caller regardless of the access setting, so isAuthorizedAdmin_ /
+ * ADMIN_ALLOWLIST (doGet) and requireSender_ (doPost, admin/AgentApi.gs) are
+ * the actual gate — see docs/ARCHITECTURE.md §2-3 for the full reasoning.
  */
 
 function doGet(e) {

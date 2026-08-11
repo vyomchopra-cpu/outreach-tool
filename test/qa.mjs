@@ -64,6 +64,12 @@ check('agent/appsscript.json scopes are exactly the Tier B set, no more', () => 
   if (forbidden.length) throw new Error(`forbidden scope present: ${forbidden.join(', ')}`);
 });
 
+check('admin/appsscript.json webapp access is ANYONE, not DOMAIN (DOMAIN breaks agent->admin Bearer calls at the front door)', () => {
+  const manifest = JSON.parse(readFileSync('admin/appsscript.json', 'utf8'));
+  if (manifest.webapp.access !== 'ANYONE') throw new Error('access is ' + manifest.webapp.access + ' — real auth is enforced in code (requireAdmin_/requireSender_), not this setting; see docs/ARCHITECTURE.md §2');
+  if (manifest.webapp.executeAs !== 'USER_ACCESSING') throw new Error('executeAs must stay USER_ACCESSING for Session.getActiveUser() to reflect the real caller');
+});
+
 check('Signals tab schema has no body/snippet column', () => {
   const schemaSrc = readFileSync('admin/Store.gs', 'utf8');
   if (/snippet|body/i.test(schemaSrc.match(/Signals:\s*\[[^\]]*\]/)?.[0] || ''))

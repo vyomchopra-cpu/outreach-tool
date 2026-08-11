@@ -46,8 +46,18 @@ same-day delivery.
 
 ### Admin Console — `admin/`
 Apps Script web app. Deployed **Execute as: user accessing the web app**, access
-**Anyone within MoveInSync**, plus an explicit admin email allowlist checked on
-every request. Domain restriction is the gate; the allowlist is defence in depth.
+**Anyone (with a Google account)** — deliberately not domain-restricted at the
+deployment layer. A `DOMAIN`-restricted deployment rejects server-to-server
+Bearer-token calls (the agent calling the admin web app, §3) at Google's front
+door before the script runs, even for a same-domain, same-person token — this
+was discovered the hard way during pilot setup. Since `executeAs` is
+`USER_ACCESSING`, `Session.getActiveUser()` reflects the real caller regardless
+of the access setting, so the actual gate is entirely in code:
+`isAuthorizedAdmin_` + `ADMIN_ALLOWLIST` for the console (`doGet`), and
+`requireSender_` for the agent API (`doPost`, `admin/AgentApi.gs`). The
+deployment's `access` setting is not a security boundary here — it never was
+meant to be one, since it can't distinguish "admin" from "agent" callers
+anyway; both hit the same `/exec` URL.
 
 - Campaign builder — subject, HTML body, merge tags, sender pool selection
 - Recipient import — CSV → validate → dedupe → suppression check
