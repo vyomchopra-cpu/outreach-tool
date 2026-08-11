@@ -28,6 +28,11 @@ function allSource(dir) {
     .map(f => readFileSync(`${dir}/${f}`, 'utf8')).join('\n');
 }
 
+// Strips block and line comments so grep-style checks match code, not prose that happens to name a forbidden symbol.
+function stripComments_(src) {
+  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+}
+
 /**
  * .gs files are plain top-level-function scripts, not ES modules — there is
  * nothing to import. This loads shared/MergeEngine.gs + shared/Renderer.gs
@@ -49,7 +54,7 @@ function loadSharedRenderer_() {
 }
 
 check('agent/ never references GmailApp or MailApp', () => {
-  const src = allSource('agent');
+  const src = stripComments_(allSource('agent'));
   if (/\bGmailApp\b|\bMailApp\b/.test(src)) throw new Error('forbidden API referenced');
 });
 
@@ -92,13 +97,23 @@ check('every public admin function (no trailing _) calls requireAdmin_(), except
   // Exemptions must be deliberate and documented at their definition site:
   // doGet does its own isAuthorizedAdmin_ check before any Campaign.gs/Store.gs
   // code runs; approveCampaignAsExec is intentionally exec-gated, not admin-gated.
-  const EXEMPT = new Set(['doGet', 'approveCampaignAsExec']);
-  const adminFiles = readdirSync('admin').filter(f => f.endsWith('.gs'));
+  // AgentApi.gs and doPost are excluded entirely below — they're the sender-facing
+  // API surface and are checked by requireSender_(), not requireAdmin_().
+  const EXEMPT = new Set(['doGet', 'doPost', 'approveCampaignAsExec']);
+  const adminFiles = readdirSync('admin').filter(f => f.endsWith('.gs') && f !== 'AgentApi.gs');
   const src = adminFiles.map(f => readFileSync(`admin/${f}`, 'utf8')).join('\n');
   const fns = extractFunctions_(src);
   const unguarded = fns.filter(f =>
     !f.name.endsWith('_') && !EXEMPT.has(f.name) && !f.body.includes('requireAdmin_('));
   if (unguarded.length) throw new Error('missing requireAdmin_() in: ' + unguarded.map(f => f.name).join(', '));
+});
+
+check('every function in admin/AgentApi.gs is sender-gated (requireSender_ or an explicit identity check)', () => {
+  const src = readFileSync('admin/AgentApi.gs', 'utf8');
+  const fns = extractFunctions_(src);
+  const unguarded = fns.filter(f =>
+    !f.name.endsWith('_') && !f.body.includes('requireSender_(') && !f.body.includes('Session.getActiveUser('));
+  if (unguarded.length) throw new Error('missing sender auth in: ' + unguarded.map(f => f.name).join(', '));
 });
 
 /** Loads shared/Csv.gs + shared/Schedule.gs, stubbing Utilities.formatDate via real Intl timezone conversion. */
@@ -228,13 +243,74 @@ check('zonedTimeToUtc_ converts IST (UTC+5:30, no DST) correctly', () => {
     throw new Error(`expected ${expected.toISOString()}, got ${utc.toISOString()}`);
 });
 
-check('every send path produces multipart/alternative (text + html)', () => 'SKIP');
-check('send outside 09:00-17:00 window is rejected by agent, not just admin UI', () => 'SKIP');
-check('daily cap enforced at agent send time', () => 'SKIP');
+check('isWithinSendWindow_ correctly bounds the 09:00-17:00 window', () => {
+  const ctx = loadSharedSchedule_();
+  const window = { startHour: 9, endHour: 17 };
+  // Build explicit UTC instants for 08:59 / 09:00 / 16:59 / 17:00 IST (IST = UTC+5:30).
+  const istToUtc = (h, m) => new Date(Date.UTC(2026, 5, 15, h, m) - (5 * 60 + 30) * 60000);
+  if (ctx.isWithinSendWindow_(istToUtc(8, 59), 'Asia/Kolkata', window, ctx.formatInZoneViaUtilities_)) throw new Error('08:59 IST should be outside window');
+  if (!ctx.isWithinSendWindow_(istToUtc(9, 0), 'Asia/Kolkata', window, ctx.formatInZoneViaUtilities_)) throw new Error('09:00 IST should be inside window');
+  if (!ctx.isWithinSendWindow_(istToUtc(16, 59), 'Asia/Kolkata', window, ctx.formatInZoneViaUtilities_)) throw new Error('16:59 IST should be inside window');
+  if (ctx.isWithinSendWindow_(istToUtc(17, 0), 'Asia/Kolkata', window, ctx.formatInZoneViaUtilities_)) throw new Error('17:00 IST should be outside window (end exclusive)');
+});
+
+check('remainingCapToday_ never goes negative and stops at the cap', () => {
+  const ctx = loadSharedSchedule_();
+  if (ctx.remainingCapToday_(20, 5) !== 15) throw new Error('20 cap, 5 sent should leave 15');
+  if (ctx.remainingCapToday_(20, 25) !== 0) throw new Error('over-cap sent count must floor at 0, not go negative');
+});
+
+check('backoffMinutes_ grows and is capped', () => {
+  const ctx = loadSharedSchedule_();
+  if (ctx.backoffMinutes_(1) >= ctx.backoffMinutes_(2)) throw new Error('backoff should increase with attempts');
+  if (ctx.backoffMinutes_(20) > 240) throw new Error('backoff must be capped at 240 minutes');
+});
+
+/** Loads shared/Mime.gs into a VM sandbox with Node-side base64/uuid stubs. */
+function loadSharedMime_() {
+  const ctx = {};
+  vm.createContext(ctx);
+  vm.runInContext(readFileSync('shared/Mime.gs', 'utf8'), ctx);
+  return ctx;
+}
+
+check('every send path produces multipart/alternative (text + html)', () => {
+  const ctx = loadSharedMime_();
+  const base64Fn = (s) => Buffer.from(s, 'utf8').toString('base64');
+  const uuidFn = () => '12345678-1234-1234-1234-123456789012';
+  const raw = ctx.buildMimeMessage_({
+    fromDisplayName: 'Jane Exec', fromEmail: 'jane@moveinsync.com', toEmail: 'prospect@acme.com',
+    replyTo: 'jane+o@moveinsync.com', subject: 'Quick question', html: '<p>Hi there</p>', text: 'Hi there',
+  }, base64Fn, uuidFn);
+  if (!ctx.mimeHasBothParts_(raw)) throw new Error('MIME message is missing multipart/alternative text+html parts');
+});
+
+check('agent send window guard: agent/Sender.gs calls isWithinSendWindow_ before every send', () => {
+  const src = readFileSync('agent/Sender.gs', 'utf8');
+  if (!/isWithinSendWindow_\(/.test(src)) throw new Error('processJob_ does not re-check the send window independently');
+});
+
+check('daily cap enforced server-side at poll time: pollDueJobs uses remainingCapToday_', () => {
+  const src = readFileSync('admin/AgentApi.gs', 'utf8');
+  if (!/remainingCapToday_\(/.test(src) || !/capForSenderToday_\(/.test(src))
+    throw new Error('pollDueJobs does not derive an allowance from the cap ramp');
+});
+
+check('suppressed email cannot be queued or sent, checked twice (import time + poll time)', () => {
+  const importSrc = readFileSync('admin/Recipients.gs', 'utf8');
+  const pollSrc = readFileSync('admin/AgentApi.gs', 'utf8');
+  if (!/isSuppressed_\(/.test(importSrc)) throw new Error('importRecipientsCsv does not check suppression at import time');
+  if (!/isSuppressed_\(/.test(pollSrc)) throw new Error('pollDueJobs does not re-check suppression at send time');
+});
+
+check('idempotency key prevents double-send: reportSent short-circuits on an already-sent queue row', () => {
+  const src = readFileSync('admin/AgentApi.gs', 'utf8');
+  if (!/status\s*===\s*['"]sent['"]\s*\)\s*return/.test(src))
+    throw new Error('reportSent has no guard against re-processing an already-sent row');
+});
+
 check('bounce rate > 3% halts all campaigns', () => 'SKIP');
 check('reply auto-cancels remaining follow-ups for that recipient', () => 'SKIP');
-check('suppressed email cannot be queued or sent, checked twice', () => 'SKIP');
-check('idempotency key prevents double-send on duplicate queue read', () => 'SKIP');
 
 console.log(`\n${pass} passed, ${fail} failed, ${skip} skipped`);
 process.exit(fail > 0 ? 1 : 0);

@@ -122,3 +122,28 @@ function dueAtUtcForSlot_(dateOnly, startHour, minuteOffset, timeZone, formatInZ
 function formatInZoneViaUtilities_(date, timeZone) {
   return Utilities.formatDate(date, timeZone, "yyyy-MM-dd'T'HH:mm:ss");
 }
+
+/**
+ * How many more jobs a sender may be handed *this poll*, so an agent that
+ * was offline and comes back to a backlog of overdue jobs cannot blow past
+ * the daily cap by catching up all at once (README hard rule 6).
+ */
+function remainingCapToday_(capToday, sentToday) {
+  return Math.max(0, capToday - sentToday);
+}
+
+/** Exponential backoff in minutes for a failed send, capped at ~4h so a stuck job doesn't vanish for days. */
+function backoffMinutes_(attempts) {
+  return Math.min(240, Math.pow(2, attempts) * 2);
+}
+
+/** Local wall-clock hour in timeZone for `now` — used for the agent's own independent window check. */
+function localHour_(now, timeZone, formatInZone) {
+  const s = formatInZone(now, timeZone); // "yyyy-MM-ddTHH:mm:ss"
+  return parseInt(s.slice(11, 13), 10);
+}
+
+function isWithinSendWindow_(now, timeZone, sendWindow, formatInZone) {
+  const hour = localHour_(now, timeZone, formatInZone);
+  return hour >= sendWindow.startHour && hour < sendWindow.endHour;
+}

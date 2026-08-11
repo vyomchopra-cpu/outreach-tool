@@ -21,6 +21,9 @@ const SCHEMA = {
   Events: ['ts', 'actor', 'type', 'campaign_id', 'recipient_id', 'sender_email', 'detail'],
   Health: ['date', 'sender_email', 'sent', 'bounced', 'replied', 'unsubscribed',
     'bounce_rate', 'complaint_rate'],
+  // Single-purpose global KV store: kill_switch, and one row per halted
+  // sender/campaign when the bounce/complaint circuit breaker trips.
+  Control: ['key', 'value', 'updated_at', 'updated_by'],
 };
 
 /** Bootstraps any missing tab with its header row. Idempotent — safe to call every deploy. */
@@ -46,7 +49,19 @@ const PRIMARY_KEY = {
   Suppression: 'email',
   Events: null,
   Health: null, // composite (date, sender_email) — see upsertHealth_
+  Control: 'key',
 };
+
+/** Global kill switch, checked by the agent every tick before it does anything else. */
+function isKillSwitchOn_() {
+  const row = findRow_('Control', 'kill_switch');
+  return !!row && row.value === 'on';
+}
+
+function setKillSwitch_(on, actor) {
+  upsertRow_('Control', { key: 'kill_switch', value: on ? 'on' : 'off', updated_at: new Date(), updated_by: actor });
+  logEvent_(actor, 'halt', { detail: { action: on ? 'kill_switch_on' : 'kill_switch_off' } });
+}
 
 // Columns holding structured data — JSON-stringified on write, parsed on read.
 const JSON_COLUMNS = {

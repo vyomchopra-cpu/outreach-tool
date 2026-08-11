@@ -100,7 +100,15 @@ misconfigured deployment.
 
 Handled entirely by Gmail, using `gmail.settings.basic`. We never read anything.
 
-Every campaign message carries `Reply-To: <exec>+o<campaignId>@moveinsync.com`.
+Every campaign message carries a single, **fixed** `Reply-To: <exec>+o@moveinsync.com` —
+not a per-campaign tag. Gmail filter criteria match a literal `to:` string,
+not a wildcard/prefix, so a per-campaign suffix (`+o<campaignId>@`) would need
+one filter created per campaign, which doesn't scale and isn't how the
+onboarding filters (created once, at agent install) are built. Campaign
+attribution for a reply comes from matching its `In-Reply-To` header against
+`Queue.sent_message_id` (see `docs/SCHEMA.md` `Signals.in_reply_to`) — that
+match is exact and per-message already, so the plus-tag doesn't need to carry
+the campaign id too.
 
 **Timezone mode is chosen per campaign** (`Campaigns.tz_mode`, see
 `docs/SCHEMA.md`) — `sender` runs the whole campaign on the exec's own 9–5;
@@ -111,7 +119,7 @@ Scheduling math always happens once, at queue-build time, producing a UTC
 
 | Filter | Criterion | Action |
 |---|---|---|
-| Replies | `to: exec+o*@moveinsync.com` | Label `Outreach/Replies` |
+| Replies | `to: exec+o@moveinsync.com` | Label `Outreach/Replies` |
 | Bounces | `from: mailer-daemon@googlemail.com` | Label `Outreach/Bounces` |
 | Unsubs | `to: exec+unsub@moveinsync.com` | Label `Outreach/Unsubscribes`, skip inbox |
 

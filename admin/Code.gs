@@ -34,6 +34,44 @@ function requireAdmin_() {
   return email;
 }
 
+/**
+ * HTTP entry point for sender agents (a separate Apps Script project per
+ * exec — see agent/CentralClient.gs). Deliberately a hand-picked whitelist
+ * rather than "call any global function by name": doPost is reachable by
+ * anyone who can construct an HTTP request, so the attack surface is exactly
+ * these six functions, each of which does its own requireSender_ auth
+ * (admin/AgentApi.gs) before touching the Store.
+ */
+const AGENT_API_ACTIONS = {
+  registerSender: registerSender,
+  heartbeat: heartbeat,
+  pollDueJobs: pollDueJobs,
+  reportSent: reportSent,
+  reportFailed: reportFailed,
+  reportSignals: reportSignals,
+};
+
+function doPost(e) {
+  let body;
+  try {
+    body = JSON.parse(e.postData.contents);
+  } catch (err) {
+    return jsonResponse_({ error: 'Malformed JSON body' }, 400);
+  }
+  const fn = AGENT_API_ACTIONS[body.action];
+  if (!fn) return jsonResponse_({ error: 'Unknown action: ' + body.action }, 400);
+  try {
+    const result = fn.apply(null, body.args || []);
+    return jsonResponse_({ ok: true, result: result });
+  } catch (err) {
+    return jsonResponse_({ ok: false, error: err.message }, 200); // 200 so agent can parse the structured error
+  }
+}
+
+function jsonResponse_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
+
 /** Lets ui/Index.html pull in ui/Preview.html etc. via <?!= include('ui/Preview') ?> if split up later. */
 function include_(filename) {
   return HtmlService.createHtmlOutputFromFile(filename).getContent();

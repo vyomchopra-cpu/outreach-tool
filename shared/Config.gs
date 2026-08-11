@@ -44,3 +44,10 @@ const REPLY_TO_DOMAIN = 'moveinsync.com';
 const ADMIN_ALLOWLIST = [
   // 'admin1@moveinsync.com',
 ];
+
+// The admin web app's /exec URL — set once the admin project is deployed.
+// Agents call this directly; it never changes without a redeploy of the
+// EXISTING deployment (README hard rule 7), which keeps this constant stable.
+const CENTRAL_WEBAPP_URL = ''; // e.g. 'https://script.google.com/macros/s/AKfycb.../exec'
+
+const AGENT_VERSION = '0.1.0';
