@@ -107,15 +107,85 @@ function reportSent(email, secret, queueId, gmailMessageId) {
 }
 
 /**
- * Stub — full implementation is Stage 5 (docs/BUILD_ORDER.md), which adds
- * reply auto-pause and bounce/unsuppress handling. Kept here as a no-op body
- * so the doPost whitelist in Code.gs (which references it by name) is valid
- * and Stage 4 is independently deployable before Stage 5 lands.
+ * Cancels every still-pending Queue row for one recipient (used on reply/unsub).
+ * A no-op today beyond a single row, since v1 schedules one Queue row per
+ * Recipient — kept general so it's already correct once multi-touch
+ * sequences exist (docs/BUILD_ORDER.md notes this as a known v1 scope gap).
+ */
+function cancelPendingQueueForRecipient_(recipientId, reason) {
+  readRows_('Queue', function (q) { return q.recipient_id === recipientId && q.status === 'pending'; })
+    .forEach(function (q) { updateRowAt_('Queue', q._row, { status: 'cancelled', error: reason }); });
+}
+
+/** Suppression is global (docs/SCHEMA.md) — cancels pending sends to this email across every campaign, not just the one it came from. */
+function cancelPendingQueueForEmail_(email, reason) {
+  const recipientRows = readRows_('Recipients', function (r) { return r.email === email; });
+  recipientRows.forEach(function (r) { cancelPendingQueueForRecipient_(r.id, reason); });
+}
+
+function findRecipientByRfcMessageId_(rfcMessageId) {
+  if (!rfcMessageId) return null;
+  const q = readRows_('Queue', function (row) { return row.sent_message_id === rfcMessageId; })[0];
+  if (!q) return null;
+  return findRow_('Recipients', q.recipient_id);
+}
+
+/** bump today's bounce count for a sender and trip the global kill switch if the rolling rate breaches threshold. */
+function recordBounceAndCheckHalt_(senderEmail) {
+  const sender = findRow_('Senders', senderEmail);
+  if (!sender) return;
+  const todayLocal = formatInZoneViaUtilities_(new Date(), sender.timezone).slice(0, 10);
+  const sentToday = sentTodayCountFor_(sender);
+  const existing = readRows_('Health', function (h) { return h.date === todayLocal && h.sender_email === senderEmail; })[0];
+  const bounced = (existing ? existing.bounced : 0) + 1;
+  const bounceRate = sentToday > 0 ? (bounced / sentToday) * 100 : 0;
+  upsertHealth_({
+    date: todayLocal, sender_email: senderEmail,
+    sent: sentToday, bounced: bounced,
+    replied: existing ? existing.replied : 0,
+    unsubscribed: existing ? existing.unsubscribed : 0,
+    bounce_rate: bounceRate,
+    complaint_rate: existing ? existing.complaint_rate : 0,
+  });
+  if (bounceRate > GOVERNANCE.bounceRateHaltPct && sentToday >= 5) { // ignore the noisy small-sample-size regime
+    setKillSwitch_(true, 'system:bounce-rate-breach:' + senderEmail);
+    logEvent_('system', 'halt', { senderEmail: senderEmail, detail: { reason: 'bounce_rate', rate: bounceRate } });
+  }
+}
+
+/**
+ * Tier B in practice: appends the header-only signal row, then reacts —
+ * reply cancels remaining sends to that person, bounce feeds the circuit
+ * breaker, unsubscribe adds a permanent global suppression. Never reads or
+ * stores a message body (docs/SCHEMA.md Signals has no body-shaped column,
+ * and test/qa.mjs asserts that structurally).
  */
 function reportSignals(email, secret, signals) {
   requireSender_(email, secret);
-  // TODO Stage 5: appendRow_('Signals', ...) per signal, reply auto-pause,
-  // bounce -> Health rollup, unsubscribe -> addSuppression_. Never touch body/snippet.
+  (signals || []).forEach(function (sig) {
+    const recipient = findRecipientByRfcMessageId_(sig.in_reply_to);
+    appendRow_('Signals', {
+      ts: new Date(),
+      sender_email: email,
+      kind: sig.kind,
+      gmail_message_id: sig.gmail_message_id,
+      in_reply_to: sig.in_reply_to || '',
+      from_header: sig.from_header || '',
+      matched_recipient_id: recipient ? recipient.id : '',
+    });
+
+    if (sig.kind === 'reply' && recipient) {
+      updateRow_('Recipients', recipient.id, { status: 'replied' });
+      cancelPendingQueueForRecipient_(recipient.id, 'recipient replied');
+      logEvent_(email, 'admin_action', { recipientId: recipient.id, senderEmail: email, detail: { action: 'auto_pause_on_reply' } });
+    } else if (sig.kind === 'bounce') {
+      if (recipient) updateRow_('Recipients', recipient.id, { status: 'bounced' });
+      recordBounceAndCheckHalt_(email);
+    } else if (sig.kind === 'unsubscribe' && sig.from_header) {
+      addSuppression_(sig.from_header, 'unsubscribe', 'sender:' + email);
+      cancelPendingQueueForEmail_(sig.from_header, 'unsubscribed');
+    }
+  });
 }
 
 function reportFailed(email, secret, queueId, errorMessage) {

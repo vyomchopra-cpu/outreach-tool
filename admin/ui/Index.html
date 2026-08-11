@@ -33,6 +33,22 @@
 <h1>MIS Outreach — Campaign Builder</h1>
 <div class="sub">Signed in as <span id="adminEmail"><?= adminEmail ?></span> · Tier B, primary domain, strict governance</div>
 
+<div class="panel" style="margin-bottom:24px">
+  <strong>Governance</strong>
+  <div class="sub">Kill switch stops every sender within one poll cycle (~5 min). Complaint rate has no API — read it off Google Postmaster Tools and enter it here daily.</div>
+  <div>
+    <span id="killSwitchState" class="status-pill">checking…</span>
+    <button id="btnToggleKill" class="secondary">Toggle kill switch</button>
+  </div>
+  <div style="margin-top:12px">
+    <input type="text" id="complaintSender" placeholder="sender email" style="display:inline-block;width:220px">
+    <input type="text" id="complaintDate" placeholder="YYYY-MM-DD" style="display:inline-block;width:120px">
+    <input type="text" id="complaintPct" placeholder="complaint % (e.g. 0.05)" style="display:inline-block;width:160px">
+    <button id="btnRecordComplaint" class="secondary">Record complaint rate</button>
+  </div>
+  <div id="governanceStatus" class="sub"></div>
+</div>
+
 <div class="grid">
   <div>
     <label>Campaign name</label>
@@ -290,5 +306,30 @@
     }).listCampaigns();
   }
 
+  function refreshKillSwitch_() {
+    google.script.run.withSuccessHandler(function (on) {
+      $('killSwitchState').textContent = on ? 'KILL SWITCH ON — nothing is sending' : 'sending enabled';
+      $('killSwitchState').style.background = on ? '#f5c2c2' : '#c8f0c8';
+    }).getKillSwitchStatus();
+  }
+
+  $('btnToggleKill').onclick = function () {
+    google.script.run.withSuccessHandler(function () {
+      refreshKillSwitch_();
+    }).withFailureHandler(function (err) {
+      $('governanceStatus').textContent = 'Error: ' + err.message;
+    }).setKillSwitch(!$('killSwitchState').textContent.includes('ON'));
+  };
+
+  $('btnRecordComplaint').onclick = function () {
+    google.script.run.withSuccessHandler(function () {
+      $('governanceStatus').textContent = 'Recorded.';
+      refreshKillSwitch_();
+    }).withFailureHandler(function (err) {
+      $('governanceStatus').textContent = 'Error: ' + err.message;
+    }).recordComplaintRate($('complaintSender').value, $('complaintDate').value, parseFloat($('complaintPct').value));
+  };
+
+  refreshKillSwitch_();
   refreshCampaignList();
 </script>

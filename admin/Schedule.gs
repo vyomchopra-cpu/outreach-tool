@@ -144,3 +144,39 @@ function getCampaign_noAuth_(campaignId) {
   if (!c) throw new Error('No such campaign: ' + campaignId);
   return c;
 }
+
+/**
+ * Complaint rate has no API — Google Postmaster Tools is the only source,
+ * and it's a manual daily glance, not a webhook. An admin reads the number
+ * off Postmaster and enters it here; the same GOVERNANCE.complaintRateHaltPct
+ * threshold that governs bounce rate governs this too.
+ */
+function recordComplaintRate(senderEmail, dateStr, complaintRatePct) {
+  const admin = requireAdmin_();
+  const existing = readRows_('Health', function (h) { return h.date === dateStr && h.sender_email === senderEmail; })[0];
+  upsertHealth_({
+    date: dateStr, sender_email: senderEmail,
+    sent: existing ? existing.sent : 0,
+    bounced: existing ? existing.bounced : 0,
+    replied: existing ? existing.replied : 0,
+    unsubscribed: existing ? existing.unsubscribed : 0,
+    bounce_rate: existing ? existing.bounce_rate : 0,
+    complaint_rate: complaintRatePct,
+  });
+  logEvent_(admin, 'admin_action', { senderEmail: senderEmail, detail: { action: 'record_complaint_rate', dateStr: dateStr, complaintRatePct: complaintRatePct } });
+  if (complaintRatePct > GOVERNANCE.complaintRateHaltPct) {
+    setKillSwitch_(true, admin + ' (complaint_rate_breach:' + senderEmail + ')');
+    logEvent_('system', 'halt', { senderEmail: senderEmail, detail: { reason: 'complaint_rate', rate: complaintRatePct } });
+  }
+}
+
+/** Admin-facing kill switch controls — the one-click stop the exec dashboard and the admin console both need. */
+function setKillSwitch(on) {
+  const admin = requireAdmin_();
+  setKillSwitch_(on, admin);
+}
+
+function getKillSwitchStatus() {
+  requireAdmin_();
+  return isKillSwitchOn_();
+}

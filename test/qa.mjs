@@ -309,8 +309,54 @@ check('idempotency key prevents double-send: reportSent short-circuits on an alr
     throw new Error('reportSent has no guard against re-processing an already-sent row');
 });
 
-check('bounce rate > 3% halts all campaigns', () => 'SKIP');
-check('reply auto-cancels remaining follow-ups for that recipient', () => 'SKIP');
+// --- Stage 5: Signals (Tier B) ---
+
+/** Loads agent/Signals.gs for its pure helpers — scanSignals_ itself needs live Gmail/Properties, left untested here. */
+function loadAgentSignals_() {
+  const ctx = {};
+  vm.createContext(ctx);
+  vm.runInContext(readFileSync('agent/Signals.gs', 'utf8'), ctx);
+  return ctx;
+}
+
+check('parseFromAddress_ extracts the bare email from a display-name From header', () => {
+  const ctx = loadAgentSignals_();
+  if (ctx.parseFromAddress_('Jane Prospect <jane@acme.com>') !== 'jane@acme.com')
+    throw new Error('failed on display-name form');
+  if (ctx.parseFromAddress_('jane@acme.com') !== 'jane@acme.com')
+    throw new Error('failed on bare-address form');
+  if (ctx.parseFromAddress_('Jane <JANE@ACME.COM>') !== 'jane@acme.com')
+    throw new Error('should lowercase the extracted address');
+});
+
+check('reply signal handling: reportSignals updates status and cancels remaining sends for that recipient', () => {
+  const src = readFileSync('admin/AgentApi.gs', 'utf8');
+  if (!/sig\.kind === 'reply'/.test(src) || !/cancelPendingQueueForRecipient_\(/.test(src))
+    throw new Error("reportSignals doesn't auto-pause on reply");
+  if (!/findRecipientByRfcMessageId_\(/.test(src))
+    throw new Error('reply matching does not go through Message-ID / In-Reply-To');
+});
+
+check('bounce rate > 3% halts all campaigns: recordBounceAndCheckHalt_ compares against GOVERNANCE.bounceRateHaltPct and trips the kill switch', () => {
+  const src = readFileSync('admin/AgentApi.gs', 'utf8');
+  if (!/bounceRate\s*>\s*GOVERNANCE\.bounceRateHaltPct/.test(src))
+    throw new Error('no threshold comparison against GOVERNANCE.bounceRateHaltPct');
+  if (!/setKillSwitch_\(true/.test(src))
+    throw new Error('breach does not actually trip the global kill switch');
+});
+
+check('unsubscribe signal handling: reportSignals adds a permanent suppression and cancels pending sends globally', () => {
+  const src = readFileSync('admin/AgentApi.gs', 'utf8');
+  if (!/addSuppression_\(/.test(src) || !/cancelPendingQueueForEmail_\(/.test(src))
+    throw new Error("reportSignals doesn't suppress + cancel on unsubscribe");
+});
+
+check('Signals scanning never requests a body/snippet field from the Gmail API', () => {
+  const src = stripComments_(readFileSync('agent/Signals.gs', 'utf8'));
+  if (/snippet|format=full|format=raw/.test(src))
+    throw new Error('agent/Signals.gs requests more than metadata — Tier B violation');
+  if (!/format=metadata/.test(src)) throw new Error('expected an explicit format=metadata request');
+});
 
 console.log(`\n${pass} passed, ${fail} failed, ${skip} skipped`);
 process.exit(fail > 0 ? 1 : 0);

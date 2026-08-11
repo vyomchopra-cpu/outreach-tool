@@ -17,6 +17,13 @@ function tick() {
 
     const jobs = callCentral_('pollDueJobs', [email, secret]);
     jobs.forEach(function (job) { processJob_(email, secret, job); });
+
+    try {
+      scanSignals_();
+    } catch (signalErr) {
+      // Signals failing must never block sending — log and move on.
+      Logger.log('scanSignals_ error: ' + signalErr.message);
+    }
   } catch (e) {
     Logger.log('tick() error: ' + e.message);
   } finally {
