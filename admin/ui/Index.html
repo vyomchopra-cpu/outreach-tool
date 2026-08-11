@@ -82,6 +82,34 @@
   </div>
 </div>
 
+<div class="grid" style="margin-top:24px">
+  <div class="panel">
+    <strong>Recipients</strong>
+    <div class="sub">CSV columns: email, first_name, last_name, company, title, recipient_tz (required only if scheduling clock is recipient-local). Anything else becomes a merge field.</div>
+    <textarea id="csvText" style="min-height:120px" placeholder="email,first_name,company&#10;jane@prospect.com,Jane,Prospect Co"></textarea>
+    <button id="btnImport" class="secondary">Import recipients</button>
+    <div id="importStatus" class="sub"></div>
+  </div>
+
+  <div class="panel">
+    <strong>Preflight &amp; launch</strong>
+    <div class="sub">Every check below is a hard block — a campaign cannot launch until all non-lint checks pass.</div>
+    <button id="btnPreflight" class="secondary">Run preflight check</button>
+    <div id="preflightResults"></div>
+
+    <label style="margin-top:16px">Exec approval</label>
+    <div class="sub">A named sender in the pool must approve before launch (run this while signed in as that sender).</div>
+    <button id="btnApprove" class="secondary">Approve as exec (current signed-in user)</button>
+    <div id="approveStatus" class="sub"></div>
+
+    <div style="margin-top:16px">
+      <button id="btnLaunchCanary">Launch canary (first 5)</button>
+      <button id="btnReleaseCanary" class="secondary">Release remaining after canary review</button>
+    </div>
+    <div id="launchStatus" class="sub"></div>
+  </div>
+</div>
+
 <div class="campaign-list">
   <strong>Campaigns</strong>
   <div id="campaignList"></div>
@@ -187,6 +215,70 @@
     }).withFailureHandler(function (err) {
       $('seedStatus').textContent = 'Error: ' + err.message;
     }).markSeedPassed(currentCampaignId);
+  };
+
+  function requireCampaign_(statusEl) {
+    if (!currentCampaignId) { statusEl.textContent = 'Save the draft first.'; return false; }
+    return true;
+  }
+
+  $('btnImport').onclick = function () {
+    if (!requireCampaign_($('importStatus'))) return;
+    $('importStatus').textContent = 'Importing…';
+    google.script.run.withSuccessHandler(function (r) {
+      $('importStatus').textContent = 'Imported ' + r.imported + ' · duplicates ' + r.duplicates
+        + ' · suppressed ' + r.suppressed + ' · invalid ' + r.invalid
+        + (r.invalid ? ' (see rows: ' + r.invalidRows.map(function (x) { return x.row; }).join(',') + ')' : '');
+    }).withFailureHandler(function (err) {
+      $('importStatus').textContent = 'Error: ' + err.message;
+    }).importRecipientsCsv(currentCampaignId, $('csvText').value);
+  };
+
+  $('btnPreflight').onclick = function () {
+    if (!requireCampaign_($('preflightResults'))) return;
+    google.script.run.withSuccessHandler(function (result) {
+      $('preflightResults').innerHTML = result.checks.map(function (c) {
+        const label = c.ok ? 'PASS' : (c.blocking === false ? 'WARN' : 'FAIL');
+        const color = c.ok ? '#2a7a2a' : (c.blocking === false ? '#a67c00' : '#c0392b');
+        return '<div style="font-size:12px;color:' + color + '">' + label + ' — ' + c.name
+          + (c.detail ? ' (' + c.detail + ')' : '') + '</div>';
+      }).join('');
+    }).withFailureHandler(function (err) {
+      $('preflightResults').innerHTML = '<div class="error">' + err.message + '</div>';
+    }).checkPreflight(currentCampaignId);
+  };
+
+  $('btnApprove').onclick = function () {
+    if (!requireCampaign_($('approveStatus'))) return;
+    google.script.run.withSuccessHandler(function () {
+      $('approveStatus').textContent = 'Approved.';
+    }).withFailureHandler(function (err) {
+      $('approveStatus').textContent = 'Error: ' + err.message;
+    }).approveCampaignAsExec(currentCampaignId);
+  };
+
+  $('btnLaunchCanary').onclick = function () {
+    if (!requireCampaign_($('launchStatus'))) return;
+    if (!confirm('Launch the canary send (first 5 real recipients)? This cannot be undone.')) return;
+    $('launchStatus').textContent = 'Launching canary…';
+    google.script.run.withSuccessHandler(function () {
+      $('launchStatus').textContent = 'Canary launched. Review real sends before releasing the rest.';
+      refreshCampaignList();
+    }).withFailureHandler(function (err) {
+      $('launchStatus').textContent = 'Error: ' + err.message;
+    }).launchCampaignCanary(currentCampaignId);
+  };
+
+  $('btnReleaseCanary').onclick = function () {
+    if (!requireCampaign_($('launchStatus'))) return;
+    if (!confirm('Release the remaining recipients into the send queue?')) return;
+    $('launchStatus').textContent = 'Releasing…';
+    google.script.run.withSuccessHandler(function () {
+      $('launchStatus').textContent = 'Remaining recipients scheduled.';
+      refreshCampaignList();
+    }).withFailureHandler(function (err) {
+      $('launchStatus').textContent = 'Error: ' + err.message;
+    }).releaseCanary(currentCampaignId);
   };
 
   function refreshCampaignList() {

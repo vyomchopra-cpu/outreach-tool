@@ -88,13 +88,40 @@ function extractFunctions_(src) {
   return fns;
 }
 
-check('every public admin function (no trailing _) calls requireAdmin_(), except doGet', () => {
-  const src = readFileSync('admin/Campaign.gs', 'utf8') + '\n' + readFileSync('admin/Code.gs', 'utf8');
+check('every public admin function (no trailing _) calls requireAdmin_(), except named exemptions', () => {
+  // Exemptions must be deliberate and documented at their definition site:
+  // doGet does its own isAuthorizedAdmin_ check before any Campaign.gs/Store.gs
+  // code runs; approveCampaignAsExec is intentionally exec-gated, not admin-gated.
+  const EXEMPT = new Set(['doGet', 'approveCampaignAsExec']);
+  const adminFiles = readdirSync('admin').filter(f => f.endsWith('.gs'));
+  const src = adminFiles.map(f => readFileSync(`admin/${f}`, 'utf8')).join('\n');
   const fns = extractFunctions_(src);
   const unguarded = fns.filter(f =>
-    !f.name.endsWith('_') && f.name !== 'doGet' && !f.body.includes('requireAdmin_('));
+    !f.name.endsWith('_') && !EXEMPT.has(f.name) && !f.body.includes('requireAdmin_('));
   if (unguarded.length) throw new Error('missing requireAdmin_() in: ' + unguarded.map(f => f.name).join(', '));
 });
+
+/** Loads shared/Csv.gs + shared/Schedule.gs, stubbing Utilities.formatDate via real Intl timezone conversion. */
+function loadSharedSchedule_() {
+  const ctx = {
+    Utilities: {
+      formatDate: (date, timeZone, pattern) => {
+        // Only the one pattern this codebase actually uses is supported here.
+        if (pattern !== "yyyy-MM-dd'T'HH:mm:ss") throw new Error('unsupported pattern in test stub: ' + pattern);
+        const parts = new Intl.DateTimeFormat('en-US', {
+          timeZone, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',
+          hour: '2-digit', minute: '2-digit', second: '2-digit',
+        }).formatToParts(date).reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {});
+        const hour = parts.hour === '24' ? '00' : parts.hour;
+        return `${parts.year}-${parts.month}-${parts.day}T${hour}:${parts.minute}:${parts.second}`;
+      },
+    },
+  };
+  vm.createContext(ctx);
+  const src = ['shared/Csv.gs', 'shared/Schedule.gs'].map(f => readFileSync(f, 'utf8')).join('\n');
+  vm.runInContext(src, ctx);
+  return ctx;
+}
 
 // --- Stage 1: MergeEngine + Renderer, run for real inside a VM sandbox ---
 
@@ -135,6 +162,70 @@ check('renderer output identical across repeated calls with identical input (det
   const a = ctx.render_(source, recipient);
   const b = ctx.render_(source, recipient);
   if (a.html !== b.html || a.text !== b.text) throw new Error('render_ is non-deterministic');
+});
+
+// --- Stage 3: CSV parsing, cap ramp, business-day math, timezone conversion ---
+
+check('CSV parser handles quoted commas and preserves unknown columns', () => {
+  const ctx = loadSharedSchedule_();
+  const rows = ctx.parseCsv_('email,first_name,company\n"a@x.com",Sam,"Acme, Inc."\nb@x.com,Jo,Beta Corp');
+  if (rows.length !== 2) throw new Error('expected 2 rows, got ' + rows.length);
+  if (rows[0].company !== 'Acme, Inc.') throw new Error('quoted comma mangled: ' + JSON.stringify(rows[0]));
+  if (rows[1].email !== 'b@x.com') throw new Error('unquoted row mangled: ' + JSON.stringify(rows[1]));
+});
+
+check('isValidEmail_ rejects obviously malformed addresses', () => {
+  const ctx = loadSharedSchedule_();
+  if (!ctx.isValidEmail_('a@b.com')) throw new Error('valid address rejected');
+  if (ctx.isValidEmail_('not-an-email') || ctx.isValidEmail_('a@b') || ctx.isValidEmail_(''))
+    throw new Error('malformed address accepted');
+});
+
+check('stickySenderForEmail_ is deterministic and pool-stable', () => {
+  const ctx = loadSharedSchedule_();
+  const pool = ['a@x.com', 'b@x.com', 'c@x.com'];
+  const first = ctx.stickySenderForEmail_('prospect@acme.com', pool);
+  for (let i = 0; i < 5; i++) {
+    if (ctx.stickySenderForEmail_('prospect@acme.com', pool) !== first)
+      throw new Error('sticky assignment changed across calls');
+  }
+});
+
+check('capForSenderToday_ follows the 10 -> 15 -> 20 ramp and respects the override ceiling', () => {
+  const ctx = loadSharedSchedule_();
+  const ramp = [{ afterDays: 0, cap: 10 }, { afterDays: 7, cap: 15 }, { afterDays: 14, cap: 20 }];
+  const start = new Date('2026-01-01T00:00:00Z');
+  const day = (n) => new Date(start.getTime() + n * 86400000);
+  if (ctx.capForSenderToday_(start, day(0), ramp, null) !== 10) throw new Error('day 0 should be cap 10');
+  if (ctx.capForSenderToday_(start, day(7), ramp, null) !== 15) throw new Error('day 7 should be cap 15');
+  if (ctx.capForSenderToday_(start, day(14), ramp, null) !== 20) throw new Error('day 14 should be cap 20');
+  if (ctx.capForSenderToday_(start, day(30), ramp, 25) !== 20) throw new Error('override above ceiling must clamp to 20');
+  if (ctx.capForSenderToday_(start, day(30), ramp, 5) !== 5) throw new Error('override below ceiling should apply');
+});
+
+check('businessDayOffset_ skips weekends', () => {
+  const ctx = loadSharedSchedule_();
+  const friday = new Date('2026-01-02T00:00:00'); // a Friday
+  const next = ctx.businessDayOffset_(friday, 1);
+  if (next.getDay() !== 1) throw new Error('expected Monday (day 1), got day ' + next.getDay());
+});
+
+check('scheduleSlotForIndex_ rolls to the next day when a day\'s cap is exhausted', () => {
+  const ctx = loadSharedSchedule_();
+  const capLookup = () => 10; // constant cap of 10/day
+  const first = ctx.scheduleSlotForIndex_(9, capLookup);   // last slot of day 0
+  const second = ctx.scheduleSlotForIndex_(10, capLookup); // first slot of day 1
+  if (first.dayOffset !== 0 || first.slotIndex !== 9) throw new Error('index 9 misscheduled: ' + JSON.stringify(first));
+  if (second.dayOffset !== 1 || second.slotIndex !== 0) throw new Error('index 10 misscheduled: ' + JSON.stringify(second));
+});
+
+check('zonedTimeToUtc_ converts IST (UTC+5:30, no DST) correctly', () => {
+  const ctx = loadSharedSchedule_();
+  // 09:00 IST on 2026-06-15 must be 03:30 UTC the same day.
+  const utc = ctx.zonedTimeToUtc_(2026, 5, 15, 9, 0, 'Asia/Kolkata', ctx.formatInZoneViaUtilities_);
+  const expected = new Date(Date.UTC(2026, 5, 15, 3, 30, 0));
+  if (Math.abs(utc.getTime() - expected.getTime()) > 1000)
+    throw new Error(`expected ${expected.toISOString()}, got ${utc.toISOString()}`);
 });
 
 check('every send path produces multipart/alternative (text + html)', () => 'SKIP');
