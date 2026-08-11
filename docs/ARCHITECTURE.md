@@ -68,42 +68,62 @@ was the one thing `DOMAIN` broke, and it no longer lands here.
 
 ### Agent-API Gateway — `gateway/`
 A small, second Apps Script web app whose only job is receiving `doPost`
-calls from sender agents ("Sender Agent" below) and relaying them to the Store. Deployed
-**Execute as: Me** (`USER_DEPLOYING` in the manifest — Apps Script's raw
-enum name for what the UI calls "Me"), access **Anyone (with a Google
-account)**.
+calls from sender agents ("Sender Agent" below) and relaying them to the
+Store. Deployed **Execute as: Me** (`USER_DEPLOYING` in the manifest —
+Apps Script's raw enum name for what the UI calls "Me"), access
+**Anyone, even anonymous** (`ANYONE_ANONYMOUS`).
 
-This project exists because of a real failure mode, not a preference:
-calling an Apps Script web app deployed `USER_ACCESSING` via an
-`Authorization: Bearer` token issued by a *different*, unverified internal
-Apps Script project was rejected outright by this Workspace's OAuth policy —
-Google's front door returned a bare `WWW-Authenticate: Bearer` 401 before
-the script ever ran, even for a token belonging to the same person who owns
-both projects. The same call worked fine with a token from a verified,
-widely-trusted OAuth client (`clasp`'s own), which points at Workspace API
-access-control treating unverified internal apps requesting sensitive scopes
-differently — plausible but not independently confirmed, since diagnosing it
-further requires super-admin access to the Workspace's API Controls, which
-wasn't available. `USER_DEPLOYING` sidesteps the whole problem because the
-script always runs as its owner regardless of who calls it — Google never
-needs to resolve the caller's identity, so whatever was rejecting that
-resolution never gets a chance to fire.
+This project, and its unusually open access setting, exist because of a
+real failure mode diagnosed empirically against the live deployed
+projects — not a preference. Three things were tried, in order, each
+confirmed or ruled out by direct `curl` testing (bypassing the agent
+entirely) rather than guesswork:
 
-**The honest trade-off:** `Session.getActiveUser()` inside a `USER_DEPLOYING`
-script always returns the deploying admin, never the real caller, so this
-surface cannot cross-check a claimed sender email against the caller's real
-Google identity the way the admin console still does for humans.
-Authentication here is **secret-only** — a 144-bit random value generated at
-onboarding, hashed at rest (`Senders.secret_hash`), checked by
-`requireSender_` in `gateway/AgentApi.gs`. This is a real, deliberate
-downgrade from "identity + secret" to "secret alone" for this one narrow
-surface, accepted because: (a) the surface can only poll for pre-approved
-work and report status/signals — it cannot create, edit, or launch a
-campaign, that stays entirely behind the admin console's own untouched,
-fully identity-gated deployment; (b) the secret is high-entropy, transmitted
-only over HTTPS to one endpoint, and never logged; (c) the alternative
-(giving up on machine-to-machine calls entirely, or reverting to
-domain-wide delegation) was worse on every other axis.
+1. **`admin/` deployed `USER_ACCESSING` + `DOMAIN`, agent sends a Bearer
+   token.** Rejected — a bare `WWW-Authenticate: Bearer` 401 from Google's
+   own front door, before the script ever ran, even for a token belonging
+   to the same person who owns both projects.
+2. **Loosened to `ANYONE`, still `USER_ACCESSING`, still a Bearer token.**
+   Same rejection. The same exact call, replayed with a token from a
+   verified, widely-trusted OAuth client (`clasp`'s own) instead of the
+   agent's auto-generated one, succeeded end-to-end — proving the admin
+   side of the pipe was fine, and the problem was specific to the agent's
+   token itself, not the receiving deployment's settings.
+3. **Split into `gateway/`, `USER_DEPLOYING`, still a Bearer token.** Same
+   rejection again — ruling out `USER_ACCESSING` vs `USER_DEPLOYING` as the
+   variable. This pointed at the token itself: it carries
+   `gmail.send`/`gmail.settings.basic`/`gmail.metadata`, scopes Google
+   classifies as sensitive/restricted, and a token holding restricted
+   scopes appears to be rejected outright when used to authenticate to a
+   *different* Google service, regardless of that service's own settings.
+   (Plausible Workspace-policy explanation, not independently confirmed —
+   diagnosing further needs super-admin access to Workspace API Controls,
+   which wasn't available.)
+
+**The actual fix, confirmed working:** `agent/CentralClient.gs` sends no
+Authorization header at all. `gateway/` is deployed `ANYONE_ANONYMOUS` so no
+Google auth layer is required to reach `doPost` in the first place. Verified
+directly: a plain, unauthenticated `curl` POST reached `doPost` and got a
+real `200 OK` JSON response.
+
+**The honest trade-off:** with zero Google auth layer, authentication for
+this surface is **entirely secret-based** — a 144-bit random value generated
+at onboarding, hashed at rest (`Senders.secret_hash`), checked by
+`requireSender_` in `gateway/AgentApi.gs`. `Session.getActiveUser()` inside
+a `USER_DEPLOYING` script also always returns the deploying admin, never the
+real caller, so identity cross-checking was never available here either way.
+Because *anyone on the internet* can now reach `registerSender` (the one
+function with no existing secret to check yet), `registerSender` additionally
+requires the claimed email to appear in `SENDER_POOL` (`shared/Config.gs`,
+admin-controlled) — this doesn't verify the caller, but narrows "squat an
+arbitrary email" down to "squat one of a small, admin-chosen set." Accepted
+because: (a) this surface can only poll for pre-approved work and report
+status/signals — it cannot create, edit, or launch a campaign, that stays
+entirely behind the admin console's own untouched, fully identity-gated
+`DOMAIN`-restricted deployment; (b) the secret is high-entropy, transmitted
+only over HTTPS to one endpoint, never logged; (c) the alternative (giving
+up on machine-to-machine calls entirely, or reverting to domain-wide
+delegation) was worse on every other axis.
 
 `gateway/Store.gs` and `gateway/AgentApi.gs` are synced copies —
 `admin/Store.gs` and (canonically) `gateway/AgentApi.gs` itself are the
@@ -140,21 +160,22 @@ even if it sees it twice.
 
 ## 3. Authentication between agent and central
 
-The agent calls `gateway/`, not `admin/` — see "Agent-API Gateway" above for the full story of why
-that split exists. In short: `Authorization: Bearer ScriptApp.getOAuthToken()`
-calls from one unverified internal Apps Script project to another's
-`USER_ACCESSING` web app were rejected outright by this Workspace's OAuth
-policy, discovered empirically during pilot onboarding. `gateway/` runs
-`USER_DEPLOYING` instead, which doesn't need to resolve caller identity at
-all, sidestepping the rejection.
+The agent calls `gateway/`, not `admin/`, and sends **no Authorization
+header at all** — see "Agent-API Gateway" above for the full empirical
+diagnosis of why (short version: a Bearer token carrying the agent's
+restricted Gmail scopes was rejected authenticating to any other Google
+service in this Workspace, regardless of the receiving deployment's
+settings; removing the header and deploying `gateway/` as
+`ANYONE_ANONYMOUS` was the combination that actually worked, confirmed via
+direct `curl` testing against the live projects).
 
 The consequence: authentication for this surface is **secret-only**, not
 identity + secret as originally designed. A per-exec shared secret, issued
 at onboarding (`registerSender`), hashed at rest, is the entire authentication
-factor for `gateway/AgentApi.gs`'s `requireSender_`. This is a genuine,
-documented trade-off (see "Agent-API Gateway" above for the full reasoning on why it's an
-acceptable one) — not the two-factor design this section originally
-described before the gateway split.
+factor for `gateway/AgentApi.gs`'s `requireSender_`, plus the `SENDER_POOL`
+allowlist guard on `registerSender` specifically (see "Agent-API Gateway"
+above). This is a genuine, documented trade-off — not the two-factor design
+this section originally described before the gateway split.
 
 ---
 

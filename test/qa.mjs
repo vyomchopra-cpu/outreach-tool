@@ -70,12 +70,23 @@ check('admin/appsscript.json webapp access is DOMAIN, executeAs USER_ACCESSING (
   if (manifest.webapp.executeAs !== 'USER_ACCESSING') throw new Error('executeAs must stay USER_ACCESSING for Session.getActiveUser() to reflect the real human admin');
 });
 
-check('gateway/appsscript.json is executeAs USER_DEPLOYING + access ANYONE, and carries no gmail.* scopes (it never sends mail, only relays Store data)', () => {
+check('gateway/appsscript.json is executeAs USER_DEPLOYING + access ANYONE_ANONYMOUS, and carries no gmail.* scopes', () => {
   const manifest = JSON.parse(readFileSync('gateway/appsscript.json', 'utf8'));
   if (manifest.webapp.executeAs !== 'USER_DEPLOYING') throw new Error('executeAs must be USER_DEPLOYING — see gateway/AgentApi.gs header comment for why');
-  if (manifest.webapp.access !== 'ANYONE') throw new Error('access should be ANYONE (requires a Google account, not literally anonymous)');
+  if (manifest.webapp.access !== 'ANYONE_ANONYMOUS')
+    throw new Error('access should be ANYONE_ANONYMOUS — outbound Bearer tokens carrying restricted Gmail scopes were rejected by this Workspace even for ANYONE (requires a Google account); see gateway/AgentApi.gs header comment');
   const gmailScopes = (manifest.oauthScopes || []).filter(s => s.includes('gmail'));
   if (gmailScopes.length) throw new Error('gateway should never need gmail.* scopes: ' + gmailScopes.join(', '));
+});
+
+check('registerSender is guarded by SENDER_POOL — required since gateway/ has zero Google auth layer (ANYONE_ANONYMOUS)', () => {
+  const src = readFileSync('gateway/AgentApi.gs', 'utf8');
+  if (!/SENDER_POOL\.some\(/.test(src)) throw new Error('registerSender does not check the caller\'s email against SENDER_POOL before allowing registration');
+});
+
+check('agent/CentralClient.gs sends no Authorization header to the gateway (confirmed empirically required — see file header)', () => {
+  const src = stripComments_(readFileSync('agent/CentralClient.gs', 'utf8'));
+  if (/Authorization/.test(src)) throw new Error('an Authorization header reappeared in callCentral_ — this was confirmed to break the call, see the file\'s header comment before re-adding it');
 });
 
 check('admin/Code.gs no longer handles agent traffic (doPost moved to gateway/)', () => {

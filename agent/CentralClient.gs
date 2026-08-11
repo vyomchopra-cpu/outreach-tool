@@ -1,13 +1,22 @@
 /**
  * Everything the agent needs to talk to the gateway/ project (NOT admin/ —
  * see gateway/AgentApi.gs's header comment for why they're separate
- * projects). The Bearer token is still sent, and UrlFetchApp still needs
- * SOME valid Google-authenticated request to satisfy the gateway's
- * access:"ANYONE" front door, but the gateway (executeAs:"USER_DEPLOYING") does not
- * need to resolve that token to a specific identity the way admin/'s
- * USER_ACCESSING deployment tried to — that's what made the original
- * design fail in this Workspace. The actual authentication that matters is
- * the per-sender secret below, checked by requireSender_ on the other side.
+ * projects).
+ *
+ * No Authorization header is sent, deliberately. Confirmed empirically
+ * (direct curl testing against the live deployed projects, both with and
+ * without a Bearer token): a token from this agent's own OAuth client —
+ * scoped to include gmail.send/gmail.settings.basic/gmail.metadata, all
+ * classified as sensitive/restricted by Google — was rejected outright by
+ * this Workspace's OAuth policy when used to authenticate to a *different*
+ * Google service (any script.google.com destination, regardless of that
+ * destination's own executeAs/access settings). A plain, unauthenticated
+ * request to gateway/ (deployed access:ANYONE_ANONYMOUS) succeeded cleanly.
+ * The actual authentication that matters is the per-sender secret below,
+ * checked by requireSender_ on the other side — see
+ * docs/ARCHITECTURE.md §2 ("Agent-API Gateway") for the full diagnosis and
+ * gateway/AgentApi.gs's registerSender for the SENDER_POOL guard this
+ * required, since ANYONE_ANONYMOUS means zero Google auth layer at all.
  * Nothing here touches SpreadsheetApp directly; only admin/Store.gs (via
  * gateway/AgentApi.gs's synced copy) does that.
  */
@@ -29,20 +38,15 @@ function getOrCreateSecret_() {
 
 function callCentral_(action, args) {
   if (!CENTRAL_WEBAPP_URL) throw new Error('CENTRAL_WEBAPP_URL is not configured (shared/Config.gs)');
-  const token = ScriptApp.getOAuthToken();
-  Logger.log('callCentral_(' + action + '): token prefix=' + token.slice(0, 12) + '... length=' + token.length);
   const response = UrlFetchApp.fetch(CENTRAL_WEBAPP_URL, {
     method: 'post',
     contentType: 'application/json',
-    headers: { Authorization: 'Bearer ' + token },
     payload: JSON.stringify({ action: action, args: args }),
     muteHttpExceptions: true,
     followRedirects: true,
   });
   const code = response.getResponseCode();
   const text = response.getContentText();
-  Logger.log('callCentral_(' + action + '): HTTP ' + code + ', body length=' + text.length
-    + ', headers=' + JSON.stringify(response.getAllHeaders()));
   let body;
   try {
     body = JSON.parse(text);
