@@ -1,0 +1,202 @@
+<!--
+  Campaign builder. Deliberately plain JS / no framework — this is a 2-3
+  admin internal tool, not a product surface. google.script.run is the only
+  transport; there is no separate REST API to keep in sync.
+-->
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, Arial, sans-serif; margin: 0; padding: 24px; max-width: 1100px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #666; font-size: 13px; margin-bottom: 20px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+  label { display: block; font-size: 12px; font-weight: 600; margin: 12px 0 4px; }
+  input[type=text], textarea, select { width: 100%; box-sizing: border-box; padding: 8px; font-size: 13px;
+    border: 1px solid #ccc; border-radius: 4px; font-family: inherit; }
+  textarea { min-height: 200px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+  .senders label { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; margin-right: 16px; }
+  button { padding: 8px 14px; border-radius: 4px; border: 1px solid #333; background: #1a1a1a; color: #fff;
+    font-size: 13px; cursor: pointer; margin-right: 8px; margin-top: 8px; }
+  button.secondary { background: #fff; color: #1a1a1a; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .panel { border: 1px solid #ddd; border-radius: 6px; padding: 16px; }
+  .tokens { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+  .token { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #eee; }
+  .byte-count { font-size: 12px; margin-top: 6px; }
+  .byte-count.over { color: #c0392b; font-weight: 600; }
+  .error { color: #c0392b; font-size: 13px; white-space: pre-wrap; }
+  iframe.preview { width: 100%; height: 420px; border: 1px solid #ddd; border-radius: 4px; background: #fff; }
+  .campaign-list { margin-top: 32px; }
+  .campaign-row { padding: 8px 0; border-bottom: 1px solid #eee; font-size: 13px; display: flex; justify-content: space-between; }
+  .status-pill { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #eef; }
+</style>
+
+<h1>MIS Outreach — Campaign Builder</h1>
+<div class="sub">Signed in as <span id="adminEmail"><?= adminEmail ?></span> · Tier B, primary domain, strict governance</div>
+
+<div class="grid">
+  <div>
+    <label>Campaign name</label>
+    <input type="text" id="name" placeholder="Q3 platform launch — enterprise leads">
+
+    <label>Subject</label>
+    <input type="text" id="subject" placeholder="Quick question, {{firstName}}">
+
+    <label>Sender pool</label>
+    <div class="senders" id="senders">Loading senders…</div>
+
+    <label>Scheduling clock</label>
+    <select id="tzMode">
+      <option value="sender">Sender-local (exec's own 9-5)</option>
+      <option value="recipient">Recipient-local (each prospect's own 9-5)</option>
+    </select>
+
+    <label>Body (constrained HTML — inline styles only, no &lt;style&gt;/&lt;script&gt;)</label>
+    <textarea id="bodySource" placeholder="&lt;p&gt;Hi {{firstName}}, ...&lt;/p&gt;"></textarea>
+
+    <div>
+      <button id="btnSave">Save draft</button>
+      <button id="btnPreview" class="secondary">Preview</button>
+    </div>
+    <div id="saveStatus" class="sub"></div>
+  </div>
+
+  <div class="panel">
+    <strong>Live preview</strong>
+    <div class="sub">Rendered by the exact same function that will send the real mail.</div>
+
+    <label>Sample recipient (preview only)</label>
+    <input type="text" id="sampleFirstName" placeholder="First name" value="Sam">
+    <input type="text" id="sampleCompany" placeholder="Company" value="Example Corp" style="margin-top:6px">
+    <input type="text" id="sampleTitle" placeholder="Title" value="VP Engineering" style="margin-top:6px">
+
+    <div class="tokens" id="tokens"></div>
+    <div id="previewError" class="error"></div>
+    <iframe class="preview" id="previewFrame"></iframe>
+    <div class="byte-count" id="byteCount"></div>
+
+    <div>
+      <button id="btnSeed" class="secondary" disabled>Send test emails to seed matrix</button>
+      <button id="btnMarkSeed" class="secondary" disabled>Mark seed pass confirmed</button>
+    </div>
+    <div id="seedStatus" class="sub"></div>
+  </div>
+</div>
+
+<div class="campaign-list">
+  <strong>Campaigns</strong>
+  <div id="campaignList"></div>
+</div>
+
+<script>
+  let currentCampaignId = null;
+  let clientConfig = null;
+
+  function $(id) { return document.getElementById(id); }
+
+  google.script.run.withSuccessHandler(function (cfg) {
+    clientConfig = cfg;
+    $('senders').innerHTML = cfg.senderPool.length
+      ? cfg.senderPool.map(function (s) {
+          return '<label><input type="checkbox" value="' + s.email + '"> ' + s.displayName + '</label>';
+        }).join('')
+      : '<span class="sub">No senders configured yet in SENDER_POOL (shared/Config.gs).</span>';
+    if (cfg.seedMailboxCount === 0) {
+      $('btnSeed').title = 'SEED_MAILBOXES is empty — configure the seed matrix first';
+    }
+  }).getClientConfig();
+
+  function selectedSenders() {
+    return Array.from(document.querySelectorAll('#senders input:checked')).map(function (c) { return c.value; });
+  }
+
+  function currentInput() {
+    return {
+      name: $('name').value,
+      subject: $('subject').value,
+      bodySource: $('bodySource').value,
+      senderPool: selectedSenders(),
+      tzMode: $('tzMode').value,
+    };
+  }
+
+  $('btnSave').onclick = function () {
+    $('saveStatus').textContent = 'Saving…';
+    const input = currentInput();
+    const done = function (id) {
+      currentCampaignId = id;
+      $('saveStatus').textContent = 'Saved (' + id + ')';
+      $('btnSeed').disabled = false;
+      refreshCampaignList();
+    };
+    if (currentCampaignId) {
+      google.script.run.withSuccessHandler(function () { done(currentCampaignId); })
+        .withFailureHandler(showSaveError_)
+        .saveCampaignDraft(currentCampaignId, input);
+    } else {
+      google.script.run.withSuccessHandler(done).withFailureHandler(showSaveError_).createCampaign(input);
+    }
+  };
+
+  function showSaveError_(err) { $('saveStatus').textContent = 'Error: ' + err.message; }
+
+  $('btnPreview').onclick = function () {
+    if (!currentCampaignId) { $('previewError').textContent = 'Save the draft first.'; return; }
+    const overrides = {
+      first_name: $('sampleFirstName').value,
+      company: $('sampleCompany').value,
+      title: $('sampleTitle').value,
+      custom: {},
+    };
+    google.script.run.withSuccessHandler(renderPreview_).withFailureHandler(function (err) {
+      $('previewError').textContent = err.message;
+    }).previewCampaign(currentCampaignId, overrides);
+  };
+
+  function renderPreview_(result) {
+    $('tokens').innerHTML = (result.tokensInBody || [])
+      .map(function (t) { return '<span class="token">{{' + t + '}}</span>'; }).join('');
+    if (!result.ok) {
+      $('previewError').textContent = result.error;
+      $('previewFrame').srcdoc = '';
+      $('byteCount').textContent = '';
+      return;
+    }
+    $('previewError').textContent = '';
+    $('previewFrame').srcdoc = result.html;
+    const over = result.bytes >= result.maxBytes;
+    $('byteCount').className = 'byte-count' + (over ? ' over' : '');
+    $('byteCount').textContent = result.bytes + ' / ' + result.maxBytes + ' bytes'
+      + (over ? '  — OVER LIMIT, Gmail will clip this message' : '');
+  }
+
+  $('btnSeed').onclick = function () {
+    $('seedStatus').textContent = 'Queuing seed send…';
+    google.script.run.withSuccessHandler(function () {
+      $('seedStatus').textContent = 'Seed jobs queued. They will send once a sender agent polls (Stage 4). Check all 6 seed inboxes before marking passed.';
+      $('btnMarkSeed').disabled = false;
+    }).withFailureHandler(function (err) {
+      $('seedStatus').textContent = 'Error: ' + err.message;
+    }).enqueueSeedSend(currentCampaignId);
+  };
+
+  $('btnMarkSeed').onclick = function () {
+    if (!confirm('Confirm you have visually checked all seed mailboxes and rendering looked correct?')) return;
+    google.script.run.withSuccessHandler(function () {
+      $('seedStatus').textContent = 'Seed pass recorded. Campaign can proceed to canary release.';
+      refreshCampaignList();
+    }).withFailureHandler(function (err) {
+      $('seedStatus').textContent = 'Error: ' + err.message;
+    }).markSeedPassed(currentCampaignId);
+  };
+
+  function refreshCampaignList() {
+    google.script.run.withSuccessHandler(function (campaigns) {
+      $('campaignList').innerHTML = campaigns.map(function (c) {
+        return '<div class="campaign-row"><span>' + c.name + '</span>'
+          + '<span class="status-pill">' + c.status + '</span></div>';
+      }).join('') || '<div class="sub">No campaigns yet.</div>';
+    }).listCampaigns();
+  }
+
+  refreshCampaignList();
+</script>

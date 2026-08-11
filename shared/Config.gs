@@ -38,3 +38,9 @@ const SEED_MAILBOXES = [
 ];
 
 const REPLY_TO_DOMAIN = 'moveinsync.com';
+
+// Defence in depth alongside the appsscript.json domain restriction (see
+// docs/ARCHITECTURE.md §2) — the 2-3 admins who may build/launch campaigns.
+const ADMIN_ALLOWLIST = [
+  // 'admin1@moveinsync.com',
+];
