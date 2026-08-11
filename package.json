@@ -1,0 +1,9 @@
+{
+  "name": "outreach-tool",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Internal outreach sending tool — admin console + per-exec sender agent (Apps Script)",
+  "scripts": {
+    "qa": "node test/qa.mjs"
+  }
+}
