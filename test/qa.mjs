@@ -64,10 +64,28 @@ check('agent/appsscript.json scopes are exactly the Tier B set, no more', () => 
   if (forbidden.length) throw new Error(`forbidden scope present: ${forbidden.join(', ')}`);
 });
 
-check('admin/appsscript.json webapp access is ANYONE, not DOMAIN (DOMAIN breaks agent->admin Bearer calls at the front door)', () => {
+check('admin/appsscript.json webapp access is DOMAIN, executeAs USER_ACCESSING (agent traffic moved to gateway/, so DOMAIN can stay tight)', () => {
   const manifest = JSON.parse(readFileSync('admin/appsscript.json', 'utf8'));
-  if (manifest.webapp.access !== 'ANYONE') throw new Error('access is ' + manifest.webapp.access + ' — real auth is enforced in code (requireAdmin_/requireSender_), not this setting; see docs/ARCHITECTURE.md §2');
-  if (manifest.webapp.executeAs !== 'USER_ACCESSING') throw new Error('executeAs must stay USER_ACCESSING for Session.getActiveUser() to reflect the real caller');
+  if (manifest.webapp.access !== 'DOMAIN') throw new Error('access is ' + manifest.webapp.access + ' — should be DOMAIN now that doPost/agent traffic lives in gateway/ instead; see docs/ARCHITECTURE.md §2');
+  if (manifest.webapp.executeAs !== 'USER_ACCESSING') throw new Error('executeAs must stay USER_ACCESSING for Session.getActiveUser() to reflect the real human admin');
+});
+
+check('gateway/appsscript.json is executeAs USER_DEPLOYING + access ANYONE, and carries no gmail.* scopes (it never sends mail, only relays Store data)', () => {
+  const manifest = JSON.parse(readFileSync('gateway/appsscript.json', 'utf8'));
+  if (manifest.webapp.executeAs !== 'USER_DEPLOYING') throw new Error('executeAs must be USER_DEPLOYING — see gateway/AgentApi.gs header comment for why');
+  if (manifest.webapp.access !== 'ANYONE') throw new Error('access should be ANYONE (requires a Google account, not literally anonymous)');
+  const gmailScopes = (manifest.oauthScopes || []).filter(s => s.includes('gmail'));
+  if (gmailScopes.length) throw new Error('gateway should never need gmail.* scopes: ' + gmailScopes.join(', '));
+});
+
+check('admin/Code.gs no longer handles agent traffic (doPost moved to gateway/)', () => {
+  const src = readFileSync('admin/Code.gs', 'utf8');
+  if (/function doPost/.test(src)) throw new Error('doPost found in admin/Code.gs — should live only in gateway/Code.gs now');
+});
+
+check('gateway/ never references GmailApp or MailApp', () => {
+  const src = stripComments_(allSource('gateway'));
+  if (/\bGmailApp\b|\bMailApp\b/.test(src)) throw new Error('forbidden API referenced');
 });
 
 check('Signals tab schema has no body/snippet column', () => {
@@ -103,10 +121,10 @@ check('every public admin function (no trailing _) calls requireAdmin_(), except
   // Exemptions must be deliberate and documented at their definition site:
   // doGet does its own isAuthorizedAdmin_ check before any Campaign.gs/Store.gs
   // code runs; approveCampaignAsExec is intentionally exec-gated, not admin-gated.
-  // AgentApi.gs and doPost are excluded entirely below — they're the sender-facing
-  // API surface and are checked by requireSender_(), not requireAdmin_().
-  const EXEMPT = new Set(['doGet', 'doPost', 'approveCampaignAsExec']);
-  const adminFiles = readdirSync('admin').filter(f => f.endsWith('.gs') && f !== 'AgentApi.gs');
+  // The sender-facing API (AgentApi.gs) lives entirely in gateway/ now, not
+  // here — it's checked separately, by requireSender_(), not requireAdmin_().
+  const EXEMPT = new Set(['doGet', 'approveCampaignAsExec']);
+  const adminFiles = readdirSync('admin').filter(f => f.endsWith('.gs'));
   const src = adminFiles.map(f => readFileSync(`admin/${f}`, 'utf8')).join('\n');
   const fns = extractFunctions_(src);
   const unguarded = fns.filter(f =>
@@ -114,11 +132,15 @@ check('every public admin function (no trailing _) calls requireAdmin_(), except
   if (unguarded.length) throw new Error('missing requireAdmin_() in: ' + unguarded.map(f => f.name).join(', '));
 });
 
-check('every function in admin/AgentApi.gs is sender-gated (requireSender_ or an explicit identity check)', () => {
-  const src = readFileSync('admin/AgentApi.gs', 'utf8');
+check('every function in gateway/AgentApi.gs is sender-gated by requireSender_(), except registerSender', () => {
+  // registerSender is the one deliberate exception: there is no existing Senders
+  // row to check a secret against yet — the freshly-generated secret itself is
+  // what proves legitimacy (see the function's own comment for the full reasoning).
+  const EXEMPT = new Set(['registerSender']);
+  const src = readFileSync('gateway/AgentApi.gs', 'utf8');
   const fns = extractFunctions_(src);
   const unguarded = fns.filter(f =>
-    !f.name.endsWith('_') && !f.body.includes('requireSender_(') && !f.body.includes('Session.getActiveUser('));
+    !f.name.endsWith('_') && !EXEMPT.has(f.name) && !f.body.includes('requireSender_('));
   if (unguarded.length) throw new Error('missing sender auth in: ' + unguarded.map(f => f.name).join(', '));
 });
 
@@ -297,20 +319,20 @@ check('agent send window guard: agent/Sender.gs calls isWithinSendWindow_ before
 });
 
 check('daily cap enforced server-side at poll time: pollDueJobs uses remainingCapToday_', () => {
-  const src = readFileSync('admin/AgentApi.gs', 'utf8');
+  const src = readFileSync('gateway/AgentApi.gs', 'utf8');
   if (!/remainingCapToday_\(/.test(src) || !/capForSenderToday_\(/.test(src))
     throw new Error('pollDueJobs does not derive an allowance from the cap ramp');
 });
 
 check('suppressed email cannot be queued or sent, checked twice (import time + poll time)', () => {
   const importSrc = readFileSync('admin/Recipients.gs', 'utf8');
-  const pollSrc = readFileSync('admin/AgentApi.gs', 'utf8');
+  const pollSrc = readFileSync('gateway/AgentApi.gs', 'utf8');
   if (!/isSuppressed_\(/.test(importSrc)) throw new Error('importRecipientsCsv does not check suppression at import time');
   if (!/isSuppressed_\(/.test(pollSrc)) throw new Error('pollDueJobs does not re-check suppression at send time');
 });
 
 check('idempotency key prevents double-send: reportSent short-circuits on an already-sent queue row', () => {
-  const src = readFileSync('admin/AgentApi.gs', 'utf8');
+  const src = readFileSync('gateway/AgentApi.gs', 'utf8');
   if (!/status\s*===\s*['"]sent['"]\s*\)\s*return/.test(src))
     throw new Error('reportSent has no guard against re-processing an already-sent row');
 });
@@ -336,7 +358,7 @@ check('parseFromAddress_ extracts the bare email from a display-name From header
 });
 
 check('reply signal handling: reportSignals updates status and cancels remaining sends for that recipient', () => {
-  const src = readFileSync('admin/AgentApi.gs', 'utf8');
+  const src = readFileSync('gateway/AgentApi.gs', 'utf8');
   if (!/sig\.kind === 'reply'/.test(src) || !/cancelPendingQueueForRecipient_\(/.test(src))
     throw new Error("reportSignals doesn't auto-pause on reply");
   if (!/findRecipientByRfcMessageId_\(/.test(src))
@@ -344,7 +366,7 @@ check('reply signal handling: reportSignals updates status and cancels remaining
 });
 
 check('bounce rate > 3% halts all campaigns: recordBounceAndCheckHalt_ compares against GOVERNANCE.bounceRateHaltPct and trips the kill switch', () => {
-  const src = readFileSync('admin/AgentApi.gs', 'utf8');
+  const src = readFileSync('gateway/AgentApi.gs', 'utf8');
   if (!/bounceRate\s*>\s*GOVERNANCE\.bounceRateHaltPct/.test(src))
     throw new Error('no threshold comparison against GOVERNANCE.bounceRateHaltPct');
   if (!/setKillSwitch_\(true/.test(src))
@@ -352,7 +374,7 @@ check('bounce rate > 3% halts all campaigns: recordBounceAndCheckHalt_ compares 
 });
 
 check('unsubscribe signal handling: reportSignals adds a permanent suppression and cancels pending sends globally', () => {
-  const src = readFileSync('admin/AgentApi.gs', 'utf8');
+  const src = readFileSync('gateway/AgentApi.gs', 'utf8');
   if (!/addSuppression_\(/.test(src) || !/cancelPendingQueueForEmail_\(/.test(src))
     throw new Error("reportSignals doesn't suppress + cancel on unsubscribe");
 });

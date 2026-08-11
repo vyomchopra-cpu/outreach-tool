@@ -44,26 +44,70 @@ same-day delivery.
 
 ## 2. Components
 
+Three Apps Script projects, not two — the split described in "Agent-API Gateway" below was forced
+by something discovered empirically during pilot deployment, not planned
+from the start. Read §3 before assuming the original two-project design
+still holds.
+
 ### Admin Console — `admin/`
-Apps Script web app. Deployed **Execute as: user accessing the web app**, access
-**Anyone (with a Google account)** — deliberately not domain-restricted at the
-deployment layer. A `DOMAIN`-restricted deployment rejects server-to-server
-Bearer-token calls (the agent calling the admin web app, §3) at Google's front
-door before the script runs, even for a same-domain, same-person token — this
-was discovered the hard way during pilot setup. Since `executeAs` is
-`USER_ACCESSING`, `Session.getActiveUser()` reflects the real caller regardless
-of the access setting, so the actual gate is entirely in code:
-`isAuthorizedAdmin_` + `ADMIN_ALLOWLIST` for the console (`doGet`), and
-`requireSender_` for the agent API (`doPost`, `admin/AgentApi.gs`). The
-deployment's `access` setting is not a security boundary here — it never was
-meant to be one, since it can't distinguish "admin" from "agent" callers
-anyway; both hit the same `/exec` URL.
+Apps Script web app. Deployed **Execute as: user accessing the web app**
+(`USER_ACCESSING`), access **Anyone within moveinsync.com** (`DOMAIN`).
+`Session.getActiveUser()` reflects the real human visiting the console, so
+the actual gate is entirely in code — `isAuthorizedAdmin_` + `ADMIN_ALLOWLIST`
+in `doGet` — but `DOMAIN` restriction is a real second layer on top of that,
+not just decoration, and there's no longer any reason to loosen it: this
+deployment handles **only** human browser traffic. It has no `doPost` and
+never talks to agents directly (see "Agent-API Gateway" below) — that traffic
+was the one thing `DOMAIN` broke, and it no longer lands here.
 
 - Campaign builder — subject, HTML body, merge tags, sender pool selection
 - Recipient import — CSV → validate → dedupe → suppression check
 - Preflight and seed-send gate
 - Live queue view, canary gate, kill switch
 - Read-only exec dashboards
+
+### Agent-API Gateway — `gateway/`
+A small, second Apps Script web app whose only job is receiving `doPost`
+calls from sender agents ("Sender Agent" below) and relaying them to the Store. Deployed
+**Execute as: Me** (`USER_DEPLOYING` in the manifest — Apps Script's raw
+enum name for what the UI calls "Me"), access **Anyone (with a Google
+account)**.
+
+This project exists because of a real failure mode, not a preference:
+calling an Apps Script web app deployed `USER_ACCESSING` via an
+`Authorization: Bearer` token issued by a *different*, unverified internal
+Apps Script project was rejected outright by this Workspace's OAuth policy —
+Google's front door returned a bare `WWW-Authenticate: Bearer` 401 before
+the script ever ran, even for a token belonging to the same person who owns
+both projects. The same call worked fine with a token from a verified,
+widely-trusted OAuth client (`clasp`'s own), which points at Workspace API
+access-control treating unverified internal apps requesting sensitive scopes
+differently — plausible but not independently confirmed, since diagnosing it
+further requires super-admin access to the Workspace's API Controls, which
+wasn't available. `USER_DEPLOYING` sidesteps the whole problem because the
+script always runs as its owner regardless of who calls it — Google never
+needs to resolve the caller's identity, so whatever was rejecting that
+resolution never gets a chance to fire.
+
+**The honest trade-off:** `Session.getActiveUser()` inside a `USER_DEPLOYING`
+script always returns the deploying admin, never the real caller, so this
+surface cannot cross-check a claimed sender email against the caller's real
+Google identity the way the admin console still does for humans.
+Authentication here is **secret-only** — a 144-bit random value generated at
+onboarding, hashed at rest (`Senders.secret_hash`), checked by
+`requireSender_` in `gateway/AgentApi.gs`. This is a real, deliberate
+downgrade from "identity + secret" to "secret alone" for this one narrow
+surface, accepted because: (a) the surface can only poll for pre-approved
+work and report status/signals — it cannot create, edit, or launch a
+campaign, that stays entirely behind the admin console's own untouched,
+fully identity-gated deployment; (b) the secret is high-entropy, transmitted
+only over HTTPS to one endpoint, and never logged; (c) the alternative
+(giving up on machine-to-machine calls entirely, or reverting to
+domain-wide delegation) was worse on every other axis.
+
+`gateway/Store.gs` and `gateway/AgentApi.gs` are synced copies —
+`admin/Store.gs` and (canonically) `gateway/AgentApi.gs` itself are the
+sources of truth; see `scripts/sync-shared.sh`.
 
 ### Sender Agent — `agent/`
 Standalone Apps Script, distributed as a **private Google Workspace Marketplace
@@ -82,10 +126,11 @@ Every tick:
 3. Fetch due jobs → render → send via Gmail REST → report status
 4. Scan `Outreach/*` label IDs for new message headers → report reply/bounce/unsub
 
-### Central Store — `admin/Store.gs`
+### Central Store — `admin/Store.gs` (canonical), synced into `gateway/Store.gs`
 Google Sheet for v1. All reads and writes go through `Store.gs` — **no other file
 touches the Sheet API**. That single constraint is what makes a later move to
-Firestore a one-file change rather than a rewrite.
+Firestore a one-file change (times the number of projects with a synced copy)
+rather than a rewrite.
 
 Concurrency: `LockService.getScriptLock()` around every queue mutation. Each queue
 row carries an idempotency key; the agent will not send a row already marked sent,
@@ -95,14 +140,21 @@ even if it sees it twice.
 
 ## 3. Authentication between agent and central
 
-The agent calls the central web app with
-`Authorization: Bearer ScriptApp.getOAuthToken()`. Central resolves the caller via
-`Session.getActiveUser().getEmail()` — reliable within the same Workspace domain —
-and checks it against the registered sender list.
+The agent calls `gateway/`, not `admin/` — see "Agent-API Gateway" above for the full story of why
+that split exists. In short: `Authorization: Bearer ScriptApp.getOAuthToken()`
+calls from one unverified internal Apps Script project to another's
+`USER_ACCESSING` web app were rejected outright by this Workspace's OAuth
+policy, discovered empirically during pilot onboarding. `gateway/` runs
+`USER_DEPLOYING` instead, which doesn't need to resolve caller identity at
+all, sidestepping the rejection.
 
-A per-exec shared secret, issued at onboarding, is sent alongside as defence in
-depth. Identity comes from Google; the secret only guards against a
-misconfigured deployment.
+The consequence: authentication for this surface is **secret-only**, not
+identity + secret as originally designed. A per-exec shared secret, issued
+at onboarding (`registerSender`), hashed at rest, is the entire authentication
+factor for `gateway/AgentApi.gs`'s `requireSender_`. This is a genuine,
+documented trade-off (see "Agent-API Gateway" above for the full reasoning on why it's an
+acceptable one) — not the two-factor design this section originally
+described before the gateway split.
 
 ---
 

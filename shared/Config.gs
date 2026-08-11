@@ -45,9 +45,10 @@ const ADMIN_ALLOWLIST = [
   'vyom.chopra@moveinsync.com',
 ];
 
-// The admin web app's /exec URL — set once the admin project is deployed.
-// Agents call this directly; it never changes without a redeploy of the
+// The gateway web app's /exec URL — NOT admin's. Agents call gateway/, never
+// admin/, directly (see docs/ARCHITECTURE.md §2 "Agent-API Gateway" for why
+// they're separate projects). Never changes without a redeploy of the
 // EXISTING deployment (README hard rule 7), which keeps this constant stable.
-const CENTRAL_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbzkVMxLpWszLRqL9ec9M3LNI0wRUtTAwadZ6eEoHxoQWuia_B6XEiObHlT5Smq3bsY/exec';
+const CENTRAL_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbyLM5Wyr9S_isiYbk1MPMKT3XMzjgg9r6pXBXKIQhbz7xlnScOVZwnaK14jX9DZTunA/exec';
 
 const AGENT_VERSION = '0.1.0';

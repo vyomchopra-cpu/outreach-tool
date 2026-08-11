@@ -1,14 +1,19 @@
 /**
- * Web app entry point. All real authorization happens HERE, in code — not in
- * appsscript.json's `access` setting. That setting is "ANYONE" (any Google
- * account, not "DOMAIN") deliberately: a DOMAIN-restricted deployment rejects
- * server-to-server Bearer-token calls at Google's front door before the
- * script ever runs, which breaks the agent-to-admin call in
- * agent/CentralClient.gs even for a same-domain, same-person token. Since
- * executeAs is USER_ACCESSING, Session.getActiveUser() still reflects the
- * real caller regardless of the access setting, so isAuthorizedAdmin_ /
- * ADMIN_ALLOWLIST (doGet) and requireSender_ (doPost, admin/AgentApi.gs) are
- * the actual gate — see docs/ARCHITECTURE.md §2-3 for the full reasoning.
+ * Web app entry point for the human-facing admin console only. All real
+ * authorization happens here (isAuthorizedAdmin_ / requireAdmin_) — the
+ * appsscript.json `access: DOMAIN` setting is a second, outer layer on top
+ * of that, not a replacement for it.
+ *
+ * This project no longer handles agent traffic (no doPost here) — that
+ * moved to gateway/, a separate Apps Script project deployed
+ * executeAs:"USER_DEPLOYING" because Bearer-token calls from another
+ * unverified internal Apps Script project were rejected by this Workspace's
+ * OAuth policy, even under USER_ACCESSING. Full story in gateway/AgentApi.gs's
+ * header comment and docs/ARCHITECTURE.md §2-3. Real human browser visits
+ * were never affected by that issue — only the machine-to-machine call was —
+ * so this project's deployment reverted to DOMAIN once doPost moved out;
+ * ANYONE was only ever needed to accommodate the agent call this project no
+ * longer receives.
  */
 
 function doGet(e) {
@@ -55,44 +60,6 @@ function requireAdmin_() {
   const email = Session.getActiveUser().getEmail();
   if (!isAuthorizedAdmin_(email)) throw new Error('Not authorized: ' + (email || 'unknown user'));
   return email;
-}
-
-/**
- * HTTP entry point for sender agents (a separate Apps Script project per
- * exec — see agent/CentralClient.gs). Deliberately a hand-picked whitelist
- * rather than "call any global function by name": doPost is reachable by
- * anyone who can construct an HTTP request, so the attack surface is exactly
- * these six functions, each of which does its own requireSender_ auth
- * (admin/AgentApi.gs) before touching the Store.
- */
-const AGENT_API_ACTIONS = {
-  registerSender: registerSender,
-  heartbeat: heartbeat,
-  pollDueJobs: pollDueJobs,
-  reportSent: reportSent,
-  reportFailed: reportFailed,
-  reportSignals: reportSignals,
-};
-
-function doPost(e) {
-  let body;
-  try {
-    body = JSON.parse(e.postData.contents);
-  } catch (err) {
-    return jsonResponse_({ error: 'Malformed JSON body' }, 400);
-  }
-  const fn = AGENT_API_ACTIONS[body.action];
-  if (!fn) return jsonResponse_({ error: 'Unknown action: ' + body.action }, 400);
-  try {
-    const result = fn.apply(null, body.args || []);
-    return jsonResponse_({ ok: true, result: result });
-  } catch (err) {
-    return jsonResponse_({ ok: false, error: err.message }, 200); // 200 so agent can parse the structured error
-  }
-}
-
-function jsonResponse_(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
 
 /** Lets ui/Index.html pull in ui/Preview.html etc. via <?!= include('ui/Preview') ?> if split up later. */
