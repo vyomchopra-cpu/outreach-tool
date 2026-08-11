@@ -6,7 +6,7 @@
 
 // Pilot pool. Grows by adding rows here — no code changes elsewhere should be needed.
 const SENDER_POOL = [
-  // { email: 'exec1@moveinsync.com', displayName: 'Exec One' },
+  { email: 'vyom.chopra@moveinsync.com', displayName: 'Vyom Chopra' },
 ];
 
 const SEND_WINDOW = { startHour: 9, endHour: 17 }; // sender/recipient-local per Campaigns.tz_mode
@@ -42,12 +42,12 @@ const REPLY_TO_DOMAIN = 'moveinsync.com';
 // Defence in depth alongside the appsscript.json domain restriction (see
 // docs/ARCHITECTURE.md §2) — the 2-3 admins who may build/launch campaigns.
 const ADMIN_ALLOWLIST = [
-  // 'admin1@moveinsync.com',
+  'vyom.chopra@moveinsync.com',
 ];
 
 // The admin web app's /exec URL — set once the admin project is deployed.
 // Agents call this directly; it never changes without a redeploy of the
 // EXISTING deployment (README hard rule 7), which keeps this constant stable.
-const CENTRAL_WEBAPP_URL = ''; // e.g. 'https://script.google.com/macros/s/AKfycb.../exec'
+const CENTRAL_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbzkVMxLpWszLRqL9ec9M3LNI0wRUtTAwadZ6eEoHxoQWuia_B6XEiObHlT5Smq3bsY/exec';
 
 const AGENT_VERSION = '0.1.0';

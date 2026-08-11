@@ -3,7 +3,7 @@
  * Column order here must match docs/SCHEMA.md exactly — test/qa.mjs asserts it.
  */
 
-const SHEET_ID = ''; // TODO: set after creating the central Sheet (Stage 0)
+const SHEET_ID = '1pw_BtBwaHOvAWIq66HvB81OfkMP_9rVRWK7Y3OiSjRc';
 
 const SCHEMA = {
   Senders: ['email', 'display_name', 'status', 'ramp_start_date', 'daily_cap_override',

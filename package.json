@@ -5,5 +5,8 @@
   "description": "Internal outreach sending tool — admin console + per-exec sender agent (Apps Script)",
   "scripts": {
     "qa": "node test/qa.mjs"
+  },
+  "devDependencies": {
+    "@google/clasp": "^3.3.0"
   }
 }

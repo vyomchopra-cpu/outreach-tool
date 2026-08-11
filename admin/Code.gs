@@ -12,6 +12,22 @@ function doGet(e) {
       'Contact an existing admin to be added to ADMIN_ALLOWLIST.</p>'
     );
   }
+
+  // One-time-use bootstrap trigger: visiting ?bootstrap=1 runs ensureSchema_().
+  // Exists purely because the Apps Script editor's manual Run button is
+  // unreliable for a fresh project in some browser/org configurations —
+  // this reaches the exact same idempotent function through the web app's
+  // normal auth path instead. Safe to hit repeatedly; safe to leave in place.
+  if (e.parameter && e.parameter.bootstrap === '1') {
+    try {
+      ensureSchema_();
+      return HtmlService.createHtmlOutput('<p>Schema bootstrapped OK. Tabs created/verified: '
+        + Object.keys(SCHEMA).join(', ') + '. You can remove ?bootstrap=1 and reload for the console.</p>');
+    } catch (err) {
+      return HtmlService.createHtmlOutput('<p>ensureSchema_ failed: ' + err.message + '</p>');
+    }
+  }
+
   const template = HtmlService.createTemplateFromFile('ui/Index');
   template.adminEmail = email;
   return template.evaluate()
