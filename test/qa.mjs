@@ -118,6 +118,20 @@ check('every render_/applyMerge_ call site supplies send-time extras', () => {
   if (offenders.length) throw new Error(offenders.join('; '));
 });
 
+check('access grants are domain-restricted and checked for revocation + expiry', () => {
+  const src = readFileSync('admin/Access.gs', 'utf8');
+  if (!/endsWith\('@' \+ REPLY_TO_DOMAIN\)/.test(src)) throw new Error('grantAccess does not enforce the internal-domain restriction');
+  if (!/revoked/.test(src) || !/expires_at/.test(src)) throw new Error('isAccessGrantValid_ does not check both revoked and expiry');
+});
+
+check('isAuthorizedAdmin_ checks both the permanent allowlist and time-boxed grants', () => {
+  const src = readFileSync('admin/Code.gs', 'utf8');
+  const fn = src.match(/function isAuthorizedAdmin_[\s\S]*?\n\}/);
+  if (!fn) throw new Error('isAuthorizedAdmin_ not found');
+  if (!/ADMIN_ALLOWLIST/.test(fn[0])) throw new Error('permanent allowlist path missing');
+  if (!/isAccessGrantValid_/.test(fn[0])) throw new Error('time-boxed grant path missing — access grants would silently do nothing');
+});
+
 check('the client script is syntactically valid (a broken <script> block is a blank white page, not an error)', () => {
   const html = readFileSync('admin/ui/Index.html', 'utf8');
   const m = html.match(/<script>([\s\S]*)<\/script>/);

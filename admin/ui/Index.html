@@ -184,6 +184,7 @@
       <button data-tab="audience">2 · Audience</button>
       <button data-tab="launch">3 · Launch</button>
       <button data-tab="health">Health</button>
+      <button data-tab="access">Access</button>
       <button data-tab="ops">Operations</button>
     </nav>
   </div>
@@ -194,6 +195,7 @@
   <div class="tab" id="tab-audience"><?!= include_('ui/Audience') ?></div>
   <div class="tab" id="tab-launch"><?!= include_('ui/Launch') ?></div>
   <div class="tab" id="tab-health"><?!= include_('ui/Health') ?></div>
+  <div class="tab" id="tab-access"><?!= include_('ui/Access') ?></div>
   <div class="tab" id="tab-ops"><?!= include_('ui/Operations') ?></div>
 </div>
 
@@ -251,6 +253,7 @@
       $('tab-' + b.dataset.tab).classList.add('active');
       if (b.dataset.tab === 'health') refreshHealth();
       if (b.dataset.tab === 'launch') refreshReadiness();
+      if (b.dataset.tab === 'access') refreshGrants();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     };
   });
@@ -266,6 +269,7 @@
         }).join('')
       : '<span class="hint">No senders in SENDER_POOL (shared/Config.gs).</span>';
     if (!cfg.seedMailboxCount) $('btnSeed').title = 'SEED_MAILBOXES is empty';
+    if ($('replyToDomainSpan')) $('replyToDomainSpan').textContent = cfg.replyToDomain;
 
     const u = cfg.agentWebAppUrl;
     $('agentLinks').innerHTML = u ? ''
@@ -614,6 +618,45 @@
     }).getHealthSnapshot();
   }
   $('btnRefreshHealth').onclick = refreshHealth;
+
+  // ── access grants ─────────────────────────────────────────────
+  $('btnGrantAccess').onclick = function () {
+    const email = $('grantEmail').value.trim();
+    const days = $('grantDays').value;
+    if (!email) { setMsg('grantStatus', 'Enter an email first.', 'bad'); return; }
+    google.script.run.withSuccessHandler(function (r) {
+      setMsg('grantStatus', email + ' can now sign in, through ' + new Date(r.expiresAt).toLocaleDateString() + '.', 'good');
+      $('grantEmail').value = ''; $('grantNote').value = '';
+      refreshGrants();
+    }).withFailureHandler(fail('grantStatus')).grantAccess(email, days, $('grantNote').value);
+  };
+
+  function revokeGrant(email) {
+    if (!confirm('Revoke access for ' + email + ' immediately?')) return;
+    google.script.run.withSuccessHandler(refreshGrants).withFailureHandler(fail('grantStatus')).revokeAccess(email);
+  }
+  window.revokeGrant = revokeGrant; // reached from inline onclick in generated rows
+
+  function refreshGrants() {
+    google.script.run.withSuccessHandler(function (grants) {
+      hideBar();
+      $('grantsList').innerHTML = grants.length ? grants.map(function (g) {
+        const chipClass = g.status === 'active' ? 'good' : (g.status === 'expired' ? '' : 'bad');
+        const sub = g.status === 'active'
+          ? g.daysLeft + ' day(s) left · expires ' + new Date(g.expiresAt).toLocaleDateString()
+          : (g.status === 'revoked' ? 'revoked' : 'expired ' + new Date(g.expiresAt).toLocaleDateString());
+        return '<div class="row"><span><strong>' + esc(g.email) + '</strong>'
+          + '<div class="hint">granted by ' + esc(g.grantedBy) + '  ·  ' + sub
+          + (g.note ? '  ·  ' + esc(g.note) : '') + '</div></span>'
+          + '<span style="display:flex;gap:8px;align-items:center">'
+          + '<span class="chip ' + chipClass + '">' + esc(g.status) + '</span>'
+          + (g.status === 'active' ? '<button class="secondary tiny" onclick="revokeGrant(\'' + esc(g.email) + '\')">revoke</button>' : '')
+          + '</span></div>';
+      }).join('') : '<div class="empty">No grants issued yet.</div>';
+    }).withFailureHandler(function (err) { hideBar(); $('grantsList').innerHTML = '<div class="msg bad">' + esc(clean(err.message)) + '</div>'; })
+      .listAccessGrants();
+  }
+  $('btnRefreshGrants').onclick = refreshGrants;
 
   // ── shared chrome ─────────────────────────────────────────────
   function applyKillSwitch(on) {

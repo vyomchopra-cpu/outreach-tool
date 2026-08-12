@@ -48,11 +48,18 @@ function doGet(e) {
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
+/**
+ * True if either the permanent allowlist (ADMIN_ALLOWLIST, shared/Config.gs —
+ * a code change, reviewed like any other) or a live, non-expired, non-revoked
+ * AccessGrants row (admin/Access.gs — a two-click dashboard action) covers
+ * this email. Domain-restricted either way: this is an internal tool.
+ */
 function isAuthorizedAdmin_(email) {
   if (!email) return false;
-  const domainOk = email.toLowerCase().endsWith('@' + REPLY_TO_DOMAIN);
-  const allowlisted = ADMIN_ALLOWLIST.indexOf(email.toLowerCase()) !== -1;
-  return domainOk && allowlisted;
+  const lower = email.toLowerCase();
+  if (!lower.endsWith('@' + REPLY_TO_DOMAIN)) return false;
+  if (ADMIN_ALLOWLIST.indexOf(lower) !== -1) return true;
+  return isAccessGrantValid_(lower);
 }
 
 /** Throws if the caller isn't an authorized admin — call at the top of every server function. */
@@ -80,6 +87,7 @@ function getClientConfig() {
     pollMinutes: AGENT_POLL_MINUTES,
     dailyCapRamp: DAILY_CAP_RAMP,
     allowMultiTouch: ALLOW_MULTI_TOUCH,
+    replyToDomain: REPLY_TO_DOMAIN,
   };
 }
 

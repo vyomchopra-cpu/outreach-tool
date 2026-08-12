@@ -26,6 +26,10 @@ const SCHEMA = {
   // Single-purpose global KV store: kill_switch, and one row per halted
   // sender/campaign when the bounce/complaint circuit breaker trips.
   Control: ['key', 'value', 'updated_at', 'updated_by'],
+  // Time-boxed console access, granted from the dashboard instead of a code
+  // edit + redeploy — see admin/Access.gs. ADMIN_ALLOWLIST (shared/Config.gs)
+  // is the standing/permanent list; this is the temporary one.
+  AccessGrants: ['email', 'display_name', 'granted_by', 'granted_at', 'expires_at', 'revoked', 'note'],
 };
 
 /** Bootstraps any missing tab with its header row. Idempotent — safe to call every deploy. */
@@ -52,6 +56,7 @@ const PRIMARY_KEY = {
   Events: null,
   Health: null, // composite (date, sender_email) — see upsertHealth_
   Control: 'key',
+  AccessGrants: 'email',
 };
 
 /** Global kill switch, checked by the agent every tick before it does anything else. */

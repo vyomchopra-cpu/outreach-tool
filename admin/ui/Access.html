@@ -1,0 +1,36 @@
+<!--
+  Time-boxed access. Included by ui/Index.html.
+  The person being granted access must sign in at the console URL first —
+  Apps Script's own DOMAIN-restricted deployment handles that automatically,
+  there is nothing to configure for it. What this panel controls is whether
+  their sign-in is then authorized, and for how long.
+-->
+<div class="card">
+  <h2><span class="num">⏱</span> Grant access</h2>
+  <div class="hint">Full console access — build and launch campaigns, not just view — for a fixed number of days. Internal @<span id="replyToDomainSpan">…</span> addresses only. They sign in at this same URL; nothing needs sending to them beyond the link.</div>
+  <div class="cols">
+    <div>
+      <label>Email</label>
+      <input type="text" id="grantEmail" placeholder="colleague@moveinsync.com">
+      <label>Days of access</label>
+      <input type="number" id="grantDays" min="1" max="365" value="7">
+      <label>Note <span class="hint">why, for the record</span></label>
+      <input type="text" id="grantNote" placeholder="Covering campaign launches this week">
+      <button id="btnGrantAccess">Grant access</button>
+      <div id="grantStatus" class="msg"></div>
+    </div>
+    <div class="hint" style="padding-top:26px">
+      Access is checked on every request — not just at sign-in — so an expiry
+      or a revoke takes effect on their very next click, not their next login.
+      Nothing about this affects who can <em>send mail</em> under their own
+      name: that is a separate, per-exec agent install (Operations tab),
+      unaffected by console access.
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h2><span class="num">▤</span> Active &amp; past grants</h2>
+  <button id="btnRefreshGrants" class="secondary">Refresh</button>
+  <div id="grantsList" style="margin-top:10px"></div>
+</div>
