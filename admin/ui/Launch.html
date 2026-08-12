@@ -1,0 +1,18 @@
+<!-- Step 5. Included by ui/Index.html. -->
+<div class="step">
+  <h2><span class="num">5</span> Preflight &amp; launch</h2>
+  <div class="hint">Every non-advisory check must pass. The canary sends to the first 5 only, so a mistake costs 5 recipients rather than the whole list. All of these gates are enforced server-side — this page cannot skip them.</div>
+  <button id="btnPreflight" class="secondary">Run preflight</button>
+  <div id="preflightResults" style="margin-top:8px"></div>
+  <div style="margin-top:14px">
+    <button id="btnApprove" class="secondary">Approve as exec (signed-in user)</button>
+    <button id="btnLaunchCanary">Launch canary (first 5)</button>
+    <button id="btnReleaseCanary" class="secondary">Release the rest</button>
+  </div>
+  <div id="launchStatus" class="msg"></div>
+</div>
+
+<div class="step">
+  <h2><span class="num">≡</span> Campaigns</h2>
+  <div id="campaignList"></div>
+</div>

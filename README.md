@@ -78,12 +78,36 @@ domain-wide delegation was rejected, is in `docs/ARCHITECTURE.md`.
 ## Layout
 
 ```
-admin/     Apps Script — console, campaign builder, preflight, store
-agent/     Apps Script — per-exec sender agent, deployed via private Marketplace
-shared/    Config, renderer, merge engine — synced into both projects
-test/      qa.mjs — run before every release, same rule as gmail-rewriter
-docs/      Architecture, schema, governance, deploy, exec consent
+admin/          Console: campaign builder, preflight, scheduling, health, store
+  Code.gs         doGet, auth gate, client config
+  Store.gs        THE ONLY file that touches the Sheet API
+  Campaign.gs     create/edit/preview campaigns, seed sends
+  Recipients.gs   CSV import: validate, dedupe, suppression, sticky sender
+  Preflight.gs    the blocking gates a campaign must clear
+  Schedule.gs     queue building, canary, exec approval, kill switch
+  Health.gs       one-call snapshot for the health dashboard
+  Manual.gs       manual suppression / reply recording, sender fleet
+  ui/             Index (shell + all JS) + tab partials
+
+gateway/        Machine API the agents call. Separate project for a real
+                reason — see docs/ARCHITECTURE.md before changing it.
+
+agent/          Runs inside each exec's own Google account
+  Onboard.gs      registration, trigger, labels/filters (best-effort)
+  Sender.gs       the 5-min tick: poll, render, send, report
+  Transport.gs    Gmail REST or MailApp, chosen at runtime
+  Signals.gs      Tier B reply/bounce/unsub scanning (header-only)
+  Diagnostics.gs  ?diagnose=1 — probe every capability
+  Web.gs          the exec-facing routes
+
+shared/         Synced into all three projects by scripts/sync-shared.sh
+test/           qa.mjs (run before every release) + fixtures/
+docs/           Architecture, schema, governance, analytics, test plan
 ```
+
+Day-to-day operation should never need this repo — the console's
+**Operations** tab carries the agent links, the current rules, and the
+troubleshooting order.
 
 ## Governing decisions (locked)
 

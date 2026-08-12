@@ -74,6 +74,11 @@ function getClientConfig() {
     senderPool: SENDER_POOL.map(function (s) { return { email: s.email, displayName: s.displayName }; }),
     maxHtmlBytes: MAX_HTML_BYTES,
     sendWindow: SEND_WINDOW,
+    seedMailboxes: SEED_MAILBOXES,
     seedMailboxCount: SEED_MAILBOXES.length,
+    agentWebAppUrl: AGENT_WEBAPP_URL,
+    pollMinutes: AGENT_POLL_MINUTES,
+    dailyCapRamp: DAILY_CAP_RAMP,
+    allowMultiTouch: ALLOW_MULTI_TOUCH,
   };
 }

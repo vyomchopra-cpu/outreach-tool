@@ -56,6 +56,15 @@ const ADMIN_ALLOWLIST = [
 // EXISTING deployment (README hard rule 7), which keeps this constant stable.
 const CENTRAL_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbyLM5Wyr9S_isiYbk1MPMKT3XMzjgg9r6pXBXKIQhbz7xlnScOVZwnaK14jX9DZTunA/exec';
 
+/**
+ * The pilot agent's own web app URL. Surfaced in the console's Operations tab
+ * so onboarding, diagnostics, and the manual filter guide are reachable from
+ * one place instead of being pasted around. Each exec gets their own agent
+ * project and therefore their own URL — once there is more than one, this
+ * becomes a field on the Senders row rather than a single constant.
+ */
+const AGENT_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbxP0ae8lcMhVYJg4dp5VeSYZAr7_benBZ3zF4CTTFGTyZAA2RhkwD9u-9epCZpGmqkt/exec';
+
 const AGENT_VERSION = '0.2.0';
 
 /**

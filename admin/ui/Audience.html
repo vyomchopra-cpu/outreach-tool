@@ -1,0 +1,35 @@
+<!-- Step 4 + suppression. Included by ui/Index.html. -->
+<div class="step">
+  <h2><span class="num">4</span> Recipients</h2>
+  <div class="hint">
+    Required: <code>email</code>. Recognised: <code>first_name</code>, <code>last_name</code>,
+    <code>company</code>, <code>title</code>, <code>recipient_tz</code>.
+    Any other column becomes a merge tag of the same name — including columns holding HTML,
+    inserted with <code>{{{column}}}</code>.
+  </div>
+  <button id="btnTemplate" class="secondary">Download CSV template</button>
+  <div class="drop" id="drop">Drop a .csv here, or click to choose</div>
+  <input type="file" id="fileInput" accept=".csv,text/csv" style="display:none">
+  <div id="csvPreview"></div>
+  <button id="btnImport" disabled>Import these recipients</button>
+  <div id="importStatus" class="msg"></div>
+</div>
+
+<div class="step">
+  <h2><span class="num">↯</span> Opt-outs &amp; replies</h2>
+  <div class="hint">Automatic detection needs the Gmail API, which is unavailable here — so opt-outs an exec forwards are recorded manually. Suppression is permanent, global, and checked again at send time.</div>
+  <div class="cols">
+    <div>
+      <label>Suppress permanently — one address per line</label>
+      <textarea id="suppressText" style="min-height:80px" placeholder="someone@prospect.com"></textarea>
+      <button id="btnSuppress">Suppress</button>
+      <div id="suppressStatus" class="msg"></div>
+    </div>
+    <div>
+      <label>Mark as replied</label>
+      <input type="text" id="repliedEmail" placeholder="someone@prospect.com">
+      <button id="btnMarkReplied" class="secondary">Mark replied</button>
+      <div id="repliedStatus" class="msg"></div>
+    </div>
+  </div>
+</div>

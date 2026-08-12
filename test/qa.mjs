@@ -118,6 +118,22 @@ check('every render_/applyMerge_ call site supplies send-time extras', () => {
   if (offenders.length) throw new Error(offenders.join('; '));
 });
 
+check('every UI partial referenced by the shell exists (a missing include renders an error page)', () => {
+  const shell = readFileSync('admin/ui/Index.html', 'utf8');
+  const refs = [...shell.matchAll(/include_\('ui\/([A-Za-z]+)'\)/g)].map(m => m[1]);
+  if (!refs.length) throw new Error('shell includes no partials — expected the tab bodies to be split out');
+  refs.forEach(name => {
+    if (!readdirSync('admin/ui').includes(name + '.html'))
+      throw new Error('admin/ui/Index.html includes ui/' + name + ' but admin/ui/' + name + '.html does not exist');
+  });
+});
+
+check('health snapshot reports no open/click metrics (there is no tracking pixel to source them from)', () => {
+  const src = stripComments_(readFileSync('admin/Health.gs', 'utf8'));
+  if (/openRate|open_rate|clickRate|click_rate|pixel/i.test(src))
+    throw new Error('an open/click metric appeared — see docs/ANALYTICS.md before adding tracking');
+});
+
 check('the live send path renders the preheader and leaves the subject unescaped', () => {
   // Both were missing on first write: the preheader silently never rendered in
   // real mail, and every subject containing & or a quote would have shown the

@@ -1,0 +1,41 @@
+<!--
+  Everything an operator needs that is not campaign work: agent management,
+  the current rules of the system, and where to look when something breaks.
+  Exists so routine operation never requires opening the code.
+-->
+<div class="step">
+  <h2><span class="num">⚙</span> Agent</h2>
+  <div class="hint">Each sending exec runs their own agent inside their own Google account. These links act on whoever is signed in when they are opened — send them to the exec, do not open them yourself expecting to configure someone else.</div>
+  <div id="agentLinks" class="hint">Loading…</div>
+</div>
+
+<div class="step">
+  <h2><span class="num">▤</span> Current rules</h2>
+  <div class="hint">Set in <code>shared/Config.gs</code>. Changing any of these is a code edit and a redeploy — deliberately, because they are the guardrails.</div>
+  <div id="rulesTable"></div>
+</div>
+
+<div class="step">
+  <h2><span class="num">?</span> When something looks wrong</h2>
+  <ol class="hint" style="line-height:1.7">
+    <li><strong>Nothing is sending.</strong> Check the kill switch on the Health tab, then whether the sender shows a recent heartbeat. No heartbeat means the agent's trigger is gone — the exec re-runs <em>Onboard</em>.</li>
+    <li><strong>A send failed.</strong> Health → Recent failures shows the verbatim error and how many attempts were made. Transient errors retry with backoff; a bad address fails immediately and permanently.</li>
+    <li><strong>Sends are queued but not going out.</strong> Almost always the send window: the agent refuses to send outside 09:00–17:00 on business days regardless of what was scheduled. Seed sends are the exception and go immediately.</li>
+    <li><strong>Timing is off by a few minutes.</strong> Expected. Gaps are accurate to about one poll interval.</li>
+    <li><strong>Replies are not being detected.</strong> Expected while the Gmail API is unavailable — see <code>docs/GCP_CONSTRAINT.md</code>. Record opt-outs manually on the Audience tab.</li>
+    <li><strong>Something needs a code change.</strong> <code>node test/qa.mjs</code> must pass, then <code>scripts/sync-shared.sh</code>, then <code>clasp push</code> and redeploy the <em>existing</em> deployment id. Never create a new deployment — the URL would change and the agents would stop finding the gateway.</li>
+  </ol>
+</div>
+
+<div class="step">
+  <h2><span class="num">▦</span> Reference</h2>
+  <div class="hint" style="line-height:1.8">
+    <code>docs/TEST_PLAN.md</code> — manual tests, including the two-sends-five-minutes-apart run<br>
+    <code>docs/ARCHITECTURE.md</code> — why there are three projects and how they authenticate<br>
+    <code>docs/GCP_CONSTRAINT.md</code> — what the missing Cloud permission costs and how it is worked around<br>
+    <code>docs/ANALYTICS.md</code> — what is measured, and why open tracking is deliberately absent<br>
+    <code>docs/EXEC_CONSENT.md</code> — what an exec is agreeing to<br>
+    <code>docs/DATA_RETENTION.md</code> — what is stored, for how long, and what never is<br>
+    <code>docs/SCHEMA.md</code> — every column in the central Sheet
+  </div>
+</div>

@@ -1,30 +1,36 @@
 <!--
-  Campaign builder. Plain JS, no framework — this is a 2-3 admin internal tool.
-  google.script.run is the only transport; there is no separate REST API to
-  keep in sync.
+  Shell: styles, tab nav, and all client logic. The tab bodies are separate
+  files (Compose/Audience/Launch/Health/Operations) included below; the script
+  stays here, after every include, so it can bind to the whole DOM in one pass
+  rather than each partial carrying its own fragment of state.
 
-  Laid out as numbered steps because the order is not optional: a campaign
-  cannot be seeded before it is saved, cannot launch before it is seeded and
-  approved, and every one of those gates is enforced server-side regardless of
-  what this page allows. The numbering exists so an admin can see where they
-  are, not to replace those checks.
+  Plain JS, no framework — this is a 2-3 admin internal tool, and
+  google.script.run is the only transport, so there is no second API to keep
+  in sync. Every gate this page shows is also enforced server-side: the UI
+  makes the order obvious, it does not enforce it.
 -->
 <style>
-  :root { color-scheme: light dark; --line:#ddd; --muted:#666; --bad:#c0392b; --good:#1a7f37; --warn:#a67c00; }
-  body { font-family: -apple-system, Segoe UI, Arial, sans-serif; margin:0; padding:24px; max-width:1180px; line-height:1.45; }
-  h1 { font-size:19px; margin:0 0 2px; }
-  .sub { color:var(--muted); font-size:13px; }
+  :root { color-scheme: light dark; --line:#8883; --muted:#888; --bad:#c0392b; --good:#1a7f37; --warn:#a67c00; }
+  body { font-family:-apple-system, Segoe UI, Arial, sans-serif; margin:0; padding:20px 24px 60px; max-width:1200px; line-height:1.45; }
+  h1 { font-size:19px; margin:0; }
+  .hint, .sub { color:var(--muted); font-size:12.5px; }
+  nav { display:flex; gap:4px; margin:14px 0 4px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  nav button { background:transparent; color:inherit; border:none; border-bottom:2px solid transparent;
+               padding:8px 14px; font-size:13px; cursor:pointer; margin:0; border-radius:0; }
+  nav button.active { border-bottom-color:currentColor; font-weight:600; }
+  .tab { display:none; } .tab.active { display:block; }
   .step { border:1px solid var(--line); border-radius:8px; padding:16px 18px; margin-top:16px; }
-  .step > h2 { font-size:14px; margin:0 0 2px; display:flex; align-items:center; gap:8px; }
+  .step > h2 { font-size:14px; margin:0 0 6px; display:flex; align-items:center; gap:8px; }
   .num { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px;
          border-radius:50%; background:#1a1a1a; color:#fff; font-size:12px; flex:none; }
   .cols { display:grid; grid-template-columns:1fr 1fr; gap:20px; align-items:start; }
   label { display:block; font-size:12px; font-weight:600; margin:12px 0 4px; }
+  label .hint { font-weight:400; }
   input[type=text], input[type=number], textarea, select {
-    width:100%; box-sizing:border-box; padding:8px; font-size:13px; border:1px solid #ccc;
+    width:100%; box-sizing:border-box; padding:8px; font-size:13px; border:1px solid #8886;
     border-radius:4px; font-family:inherit; background:transparent; color:inherit; }
   textarea { min-height:180px; font-family:ui-monospace, Consolas, monospace; font-size:12px; }
-  button { padding:8px 14px; border-radius:4px; border:1px solid #333; background:#1a1a1a; color:#fff;
+  button { padding:8px 14px; border-radius:4px; border:1px solid #8888; background:#1a1a1a; color:#fff;
            font-size:13px; cursor:pointer; margin:8px 8px 0 0; }
   button.secondary { background:transparent; color:inherit; }
   button:disabled { opacity:.4; cursor:not-allowed; }
@@ -34,183 +40,102 @@
   .msg { font-size:12px; margin-top:6px; white-space:pre-wrap; }
   .msg.bad { color:var(--bad); } .msg.good { color:var(--good); }
   iframe.preview { width:100%; height:340px; border:1px solid var(--line); border-radius:4px; background:#fff; }
-  .row { padding:7px 0; border-bottom:1px solid #8882; font-size:13px; display:flex; justify-content:space-between; gap:12px; }
+  .row { padding:7px 0; border-bottom:1px solid var(--line); font-size:13px; display:flex; justify-content:space-between; gap:12px; }
   .pill { font-size:11px; padding:2px 8px; border-radius:10px; background:#8883; white-space:nowrap; }
-  .drop { border:2px dashed #aaa; border-radius:6px; padding:18px; text-align:center; font-size:13px;
-          color:var(--muted); cursor:pointer; }
-  .drop.over { border-color:#1a1a1a; }
-  table.mini { width:100%; border-collapse:collapse; font-size:11px; margin-top:8px; }
-  table.mini td, table.mini th { border:1px solid var(--line); padding:3px 6px; text-align:left;
-                                 max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .drop { border:2px dashed #8886; border-radius:6px; padding:18px; text-align:center; font-size:13px; color:var(--muted); cursor:pointer; margin-top:10px; }
+  .drop.over { border-color:currentColor; }
+  table.mini { width:100%; border-collapse:collapse; font-size:11.5px; margin-top:8px; }
+  table.mini td, table.mini th { border:1px solid var(--line); padding:4px 6px; text-align:left;
+                                 max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .cards { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; }
+  .card { border:1px solid var(--line); border-radius:6px; padding:10px 14px; min-width:120px; }
+  .card b { display:block; font-size:20px; font-weight:600; }
+  .card span { font-size:11.5px; color:var(--muted); }
+  .bar { height:5px; border-radius:3px; background:#8883; overflow:hidden; margin-top:4px; }
+  .bar > i { display:block; height:100%; background:currentColor; }
   code { background:#8882; padding:1px 4px; border-radius:3px; font-size:12px; }
 </style>
 
 <h1>MIS Outreach</h1>
-<div class="sub">Signed in as <span id="adminEmail"><?= adminEmail ?></span> · single-touch pilot · sends 09:00–17:00 on business days</div>
-
-<!-- ── Governance ─────────────────────────────────────────────── -->
-<div class="step">
-  <h2><span class="num">!</span> Safety controls</h2>
-  <div class="sub">The kill switch stops every sender within one poll cycle. Complaint rate has no API — read it off Google Postmaster Tools and enter it here.</div>
-  <div style="margin-top:8px">
-    <span id="killSwitchState" class="pill">checking…</span>
-    <button id="btnToggleKill" class="secondary">Toggle kill switch</button>
-  </div>
-  <div id="senderList" style="margin-top:12px"></div>
-  <div id="governanceStatus" class="msg"></div>
+<div class="sub">
+  <span id="adminEmail"><?= adminEmail ?></span> ·
+  single-touch pilot · 09:00–17:00 business days ·
+  <span id="killSwitchState" class="pill">checking…</span>
+  <button id="btnToggleKill" class="secondary" style="padding:2px 8px;font-size:11px;margin:0 0 0 6px">toggle</button>
 </div>
 
-<!-- ── 1. Compose ─────────────────────────────────────────────── -->
-<div class="step">
-  <h2><span class="num">1</span> Compose</h2>
-  <div class="cols">
-    <div>
-      <label>Campaign name</label>
-      <input type="text" id="name" placeholder="Q3 platform launch — enterprise leads">
+<nav>
+  <button data-tab="compose" class="active">1 · Compose</button>
+  <button data-tab="audience">2 · Audience</button>
+  <button data-tab="launch">3 · Launch</button>
+  <button data-tab="health">Health</button>
+  <button data-tab="ops">Operations</button>
+</nav>
 
-      <label>Subject <span style="font-weight:400;color:var(--muted)">— plain text, merge tags allowed</span></label>
-      <input type="text" id="subject" placeholder="Quick question, {{firstName}}">
-
-      <label>Preheader <span style="font-weight:400;color:var(--muted)">— the grey preview line next to the subject</span></label>
-      <input type="text" id="preheader" placeholder="{{company}} — a quick thought on your ops">
-
-      <label>Send from</label>
-      <div class="senders" id="senders">Loading…</div>
-
-      <div class="cols" style="gap:12px">
-        <div>
-          <label>Scheduling clock</label>
-          <select id="tzMode">
-            <option value="sender">Sender-local (exec's 9–5)</option>
-            <option value="recipient">Recipient-local (each prospect's 9–5)</option>
-          </select>
-        </div>
-        <div>
-          <label>Gap between sends</label>
-          <input type="number" id="intervalMinutes" min="1" placeholder="auto">
-          <div class="sub" style="font-size:11px">Blank = spread evenly across the day with jitter (recommended). A number forces a fixed gap in minutes.</div>
-        </div>
-      </div>
-    </div>
-
-    <div>
-      <label>Body — HTML</label>
-      <div class="sub" style="margin-bottom:4px">
-        Inline styles only (Gmail strips <code>&lt;style&gt;</code>). <code>{{token}}</code> inserts text safely;
-        <code>{{{token}}}</code> inserts a column's raw HTML. Must contain <code>{{unsubscribe}}</code>.
-      </div>
-      <textarea id="bodySource" placeholder="&lt;p&gt;Hi {{firstName}},&lt;/p&gt;"></textarea>
-      <button id="btnLoadSample" class="secondary">Load sample template</button>
-    </div>
-  </div>
-  <button id="btnSave">Save draft</button>
-  <button id="btnPreview" class="secondary">Preview</button>
-  <div id="saveStatus" class="msg"></div>
-</div>
-
-<!-- ── 2. Preview ─────────────────────────────────────────────── -->
-<div class="step">
-  <h2><span class="num">2</span> Preview</h2>
-  <div class="sub">Rendered by the exact function that sends the real mail — not a separate preview renderer.</div>
-  <div class="cols">
-    <div>
-      <label>Sample values</label>
-      <input type="text" id="sampleFirstName" placeholder="First name" value="Sam">
-      <input type="text" id="sampleCompany" placeholder="Company" value="Example Corp" style="margin-top:6px">
-      <input type="text" id="sampleTitle" placeholder="Title" value="VP Engineering" style="margin-top:6px">
-      <div class="tokens" id="tokens"></div>
-      <div id="previewMeta" class="msg"></div>
-      <div id="previewError" class="msg bad"></div>
-    </div>
-    <div>
-      <iframe class="preview" id="previewFrame"></iframe>
-    </div>
-  </div>
-</div>
-
-<!-- ── 3. Test send ───────────────────────────────────────────── -->
-<div class="step">
-  <h2><span class="num">3</span> Test send</h2>
-  <div class="sub">Goes to the seed mailboxes, ignoring the 9–5 window — check rendering, then confirm. A campaign cannot launch without a confirmed seed pass from the last 24 hours.</div>
-  <button id="btnSeed" class="secondary" disabled>Send test emails</button>
-  <button id="btnMarkSeed" class="secondary" disabled>I checked them — mark passed</button>
-  <div id="seedStatus" class="msg"></div>
-</div>
-
-<!-- ── 4. Recipients ──────────────────────────────────────────── -->
-<div class="step">
-  <h2><span class="num">4</span> Recipients</h2>
-  <div class="sub">
-    Required column: <code>email</code>. Recognised: <code>first_name</code>, <code>last_name</code>,
-    <code>company</code>, <code>title</code>, <code>recipient_tz</code>. Any other column becomes a merge
-    tag of the same name — including columns holding HTML, used via <code>{{{column}}}</code>.
-  </div>
-  <button id="btnTemplate" class="secondary">Download CSV template</button>
-  <div class="drop" id="drop" style="margin-top:10px">Drop a .csv here, or click to choose</div>
-  <input type="file" id="fileInput" accept=".csv,text/csv" style="display:none">
-  <div id="csvPreview"></div>
-  <button id="btnImport" disabled>Import these recipients</button>
-  <div id="importStatus" class="msg"></div>
-</div>
-
-<!-- ── 5. Launch ──────────────────────────────────────────────── -->
-<div class="step">
-  <h2><span class="num">5</span> Preflight &amp; launch</h2>
-  <div class="sub">Every non-advisory check must pass. The canary sends to the first 5 only, so a mistake costs 5 recipients instead of all of them.</div>
-  <button id="btnPreflight" class="secondary">Run preflight</button>
-  <div id="preflightResults" style="margin-top:8px"></div>
-  <div style="margin-top:12px">
-    <button id="btnApprove" class="secondary">Approve as exec (signed-in user)</button>
-    <button id="btnLaunchCanary">Launch canary (first 5)</button>
-    <button id="btnReleaseCanary" class="secondary">Release the rest</button>
-  </div>
-  <div id="launchStatus" class="msg"></div>
-</div>
-
-<!-- ── Suppression ────────────────────────────────────────────── -->
-<div class="step">
-  <h2><span class="num">↯</span> Opt-outs &amp; replies</h2>
-  <div class="sub">Automatic detection needs the Gmail API, which is unavailable — so opt-outs an exec forwards are recorded here. Suppression is permanent and global.</div>
-  <div class="cols">
-    <div>
-      <label>Suppress permanently — one address per line</label>
-      <textarea id="suppressText" style="min-height:80px" placeholder="someone@prospect.com"></textarea>
-      <button id="btnSuppress">Suppress</button>
-      <div id="suppressStatus" class="msg"></div>
-    </div>
-    <div>
-      <label>Mark as replied</label>
-      <input type="text" id="repliedEmail" placeholder="someone@prospect.com">
-      <button id="btnMarkReplied" class="secondary">Mark replied</button>
-      <div id="repliedStatus" class="msg"></div>
-    </div>
-  </div>
-</div>
-
-<div class="step">
-  <h2><span class="num">≡</span> Campaigns</h2>
-  <div id="campaignList"></div>
-</div>
+<div class="tab active" id="tab-compose"><?!= include_('ui/Compose') ?></div>
+<div class="tab" id="tab-audience"><?!= include_('ui/Audience') ?></div>
+<div class="tab" id="tab-launch"><?!= include_('ui/Launch') ?></div>
+<div class="tab" id="tab-health"><?!= include_('ui/Health') ?></div>
+<div class="tab" id="tab-ops"><?!= include_('ui/Operations') ?></div>
 
 <script>
   let currentCampaignId = null;
   let pendingCsvText = null;
+  let clientConfig = null;
 
   const $ = function (id) { return document.getElementById(id); };
+  const esc = function (s) {
+    return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+      return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c];
+    });
+  };
   const setMsg = function (id, text, cls) {
-    const el = $(id); el.textContent = text; el.className = 'msg' + (cls ? ' ' + cls : '');
+    const el = $(id); if (!el) return;
+    el.textContent = text; el.className = 'msg' + (cls ? ' ' + cls : '');
   };
   const fail = function (id) { return function (err) { setMsg(id, 'Error: ' + err.message, 'bad'); }; };
 
+  // ── tabs ──────────────────────────────────────────────────────
+  document.querySelectorAll('nav button').forEach(function (b) {
+    b.onclick = function () {
+      document.querySelectorAll('nav button').forEach(function (x) { x.classList.remove('active'); });
+      document.querySelectorAll('.tab').forEach(function (x) { x.classList.remove('active'); });
+      b.classList.add('active');
+      $('tab-' + b.dataset.tab).classList.add('active');
+      if (b.dataset.tab === 'health') refreshHealth();
+    };
+  });
+
   // ── config ────────────────────────────────────────────────────
   google.script.run.withSuccessHandler(function (cfg) {
+    clientConfig = cfg;
     $('senders').innerHTML = cfg.senderPool.length
       ? cfg.senderPool.map(function (s) {
-          return '<label><input type="checkbox" value="' + s.email + '" checked> ' + s.displayName + '</label>';
+          return '<label><input type="checkbox" value="' + esc(s.email) + '" checked> ' + esc(s.displayName) + '</label>';
         }).join('')
-      : '<span class="sub">No senders in SENDER_POOL (shared/Config.gs).</span>';
+      : '<span class="hint">No senders in SENDER_POOL (shared/Config.gs).</span>';
     if (!cfg.seedMailboxCount) $('btnSeed').title = 'SEED_MAILBOXES is empty';
+
+    const u = cfg.agentWebAppUrl;
+    $('agentLinks').innerHTML = u ? ''
+      + '<p><a href="' + u + '?diagnose=1" target="_blank">Diagnostics</a> — probe every capability; check this first when anything is odd</p>'
+      + '<p><a href="' + u + '?testsend=1" target="_blank">Send myself a test</a> — proves the real send path end to end</p>'
+      + '<p><a href="' + u + '?setup=1" target="_blank">Manual filter setup</a> — the Gmail filters that sort replies</p>'
+      + '<p><a href="' + u + '?onboard=1" target="_blank">Onboard / re-onboard</a> — register, and (re)create the send trigger</p>'
+      + '<p><a href="' + u + '?disconnect=1" target="_blank">Pause sending</a> — removes the trigger immediately</p>'
+      : '<span class="hint">AGENT_WEBAPP_URL is not set in shared/Config.gs.</span>';
+
+    $('rulesTable').innerHTML = '<table class="mini">'
+      + row2('Send window', cfg.sendWindow.startHour + ':00 – ' + cfg.sendWindow.endHour + ':00, business days')
+      + row2('Daily cap ramp', cfg.dailyCapRamp.map(function (t) { return 'day ' + t.afterDays + '+ → ' + t.cap; }).join(' · '))
+      + row2('Agent poll', 'every ' + cfg.pollMinutes + ' min (limits how precise a send gap can be)')
+      + row2('Seed mailboxes', cfg.seedMailboxes.length ? cfg.seedMailboxes.join(', ') : '(none configured)')
+      + row2('Multi-touch sequences', cfg.allowMultiTouch ? 'allowed' : 'disabled — single-touch only while reply detection is unavailable')
+      + row2('Max HTML size', cfg.maxHtmlBytes + ' bytes before Gmail clips')
+      + '</table>';
   }).getClientConfig();
+
+  function row2(k, v) { return '<tr><th>' + esc(k) + '</th><td style="white-space:normal">' + esc(v) + '</td></tr>'; }
 
   const selectedSenders = function () {
     return Array.from(document.querySelectorAll('#senders input:checked')).map(function (c) { return c.value; });
@@ -223,30 +148,29 @@
     };
   };
 
-  // ── 1. compose ────────────────────────────────────────────────
+  // ── compose ───────────────────────────────────────────────────
   $('btnLoadSample').onclick = function () {
     $('subject').value = $('subject').value || 'Quick question, {{firstName}}';
     $('preheader').value = $('preheader').value || '{{company}} — a quick thought';
     $('bodySource').value =
       '<p>Hi {{firstName}},</p>\n' +
-      '<p>I noticed {{company}} is scaling its team — most {{title}}s we speak to are\n' +
-      'wrestling with the same commute-cost question at that point.</p>\n' +
+      '<p>I noticed {{company}} is {{{intro_html}}} — most {{title}}s we speak to\n' +
+      'hit the same commute-cost question about then.</p>\n' +
       '<p>Worth a short conversation?</p>\n' +
-      '<p>Vyom</p>\n' +
-      '<p style="color:#888;font-size:12px">Not relevant? Reply or write to {{unsubscribe}} and I will not contact you again.<br>\n' +
-      'MoveInSync, Bengaluru, India</p>';
-    setMsg('saveStatus', 'Sample loaded — edit it, then save.', 'good');
+      '<p>Vyom<br>MoveInSync</p>\n' +
+      '<p style="color:#888888;font-size:12px">Not relevant? Reply, or write to {{unsubscribe}}, and I will not contact you again.<br>\n' +
+      'MoveInSync Technologies, Bengaluru, India</p>';
+    setMsg('saveStatus', 'Sample loaded. It uses {{{intro_html}}} — your CSV needs an intro_html column, or remove that tag.', 'good');
   };
 
   $('btnSave').onclick = function () {
     setMsg('saveStatus', 'Saving…');
     const done = function (id) {
       currentCampaignId = id;
-      setMsg('saveStatus', 'Saved as ' + id + '. Preview it, then send a test.', 'good');
+      setMsg('saveStatus', 'Saved as ' + id + '. Preview, then send a test.', 'good');
       $('btnSeed').disabled = false;
       $('btnImport').disabled = !pendingCsvText;
-      refreshCampaigns();
-      doPreview();
+      refreshCampaigns(); doPreview();
     };
     if (currentCampaignId) {
       google.script.run.withSuccessHandler(function () { done(currentCampaignId); })
@@ -256,22 +180,19 @@
     }
   };
 
-  // ── 2. preview ────────────────────────────────────────────────
   function doPreview() {
     if (!currentCampaignId) { setMsg('previewError', 'Save the draft first.', 'bad'); return; }
     google.script.run.withSuccessHandler(function (r) {
       $('tokens').innerHTML = (r.tokensInBody || [])
-        .map(function (t) { return '<span class="token">{{' + t + '}}</span>'; }).join('');
+        .map(function (t) { return '<span class="token">{{' + esc(t) + '}}</span>'; }).join('');
       if (!r.ok) {
-        setMsg('previewError', r.error, 'bad');
-        $('previewFrame').srcdoc = ''; setMsg('previewMeta', '');
+        setMsg('previewError', r.error, 'bad'); $('previewFrame').srcdoc = ''; setMsg('previewMeta', '');
         return;
       }
       setMsg('previewError', '');
       $('previewFrame').srcdoc = r.html;
       const over = r.bytes >= r.maxBytes;
-      setMsg('previewMeta',
-        'Subject: ' + r.subject + '\nPreheader: ' + (r.preheader || '(none)')
+      setMsg('previewMeta', 'Subject: ' + r.subject + '\nPreheader: ' + (r.preheader || '(none)')
         + '\n' + r.bytes + ' / ' + r.maxBytes + ' bytes' + (over ? '  — OVER LIMIT, Gmail will clip this' : ''),
         over ? 'bad' : '');
     }).withFailureHandler(fail('previewError')).previewCampaign(currentCampaignId, {
@@ -281,23 +202,21 @@
   }
   $('btnPreview').onclick = doPreview;
 
-  // ── 3. seed ───────────────────────────────────────────────────
   $('btnSeed').onclick = function () {
     setMsg('seedStatus', 'Queuing…');
     google.script.run.withSuccessHandler(function () {
-      setMsg('seedStatus', 'Queued. They send on the next agent poll — check the seed inboxes before marking passed.', 'good');
+      setMsg('seedStatus', 'Queued — sends on the next agent poll. Check the seed inboxes before marking passed.', 'good');
       $('btnMarkSeed').disabled = false;
     }).withFailureHandler(fail('seedStatus')).enqueueSeedSend(currentCampaignId);
   };
   $('btnMarkSeed').onclick = function () {
     if (!confirm('Confirm you have opened the seed mailboxes and the rendering looked correct?')) return;
     google.script.run.withSuccessHandler(function () {
-      setMsg('seedStatus', 'Seed pass recorded — valid for 24 hours.', 'good');
-      refreshCampaigns();
+      setMsg('seedStatus', 'Seed pass recorded — valid 24 hours.', 'good'); refreshCampaigns();
     }).withFailureHandler(fail('seedStatus')).markSeedPassed(currentCampaignId);
   };
 
-  // ── 4. recipients ─────────────────────────────────────────────
+  // ── audience ──────────────────────────────────────────────────
   $('btnTemplate').onclick = function () {
     const csv = 'email,first_name,last_name,company,title,recipient_tz,intro_html\n'
       + 'sam@example.com,Sam,Prospect,Example Corp,VP Engineering,Asia/Kolkata,"<strong>scaling fast</strong>"\n';
@@ -317,8 +236,8 @@
   };
   $('fileInput').onchange = function (e) { if (e.target.files.length) readCsv(e.target.files[0]); };
 
-  // Read client-side and send the text: google.script.run cannot take a File,
-  // and a CSV small enough to paste is small enough to pass as a string.
+  // Read client-side and send the text: google.script.run cannot accept a File,
+  // and a list small enough for this tool is small enough to pass as a string.
   function readCsv(file) {
     const reader = new FileReader();
     reader.onload = function () {
@@ -333,43 +252,55 @@
   function renderCsvPreview(fileName, text) {
     const lines = text.split(/\r?\n/).filter(function (l) { return l.trim(); });
     const cells = lines.slice(0, 6).map(function (l) { return l.split(','); });
-    const head = (cells[0] || []).map(function (h) { return '<th>' + h + '</th>'; }).join('');
+    const head = (cells[0] || []).map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('');
     const body = cells.slice(1).map(function (r) {
-      return '<tr>' + r.map(function (c) { return '<td>' + c + '</td>'; }).join('') + '</tr>';
+      return '<tr>' + r.map(function (c) { return '<td>' + esc(c) + '</td>'; }).join('') + '</tr>';
     }).join('');
-    $('csvPreview').innerHTML = '<div class="sub" style="margin-top:8px">' + fileName + ' — '
-      + (lines.length - 1) + ' data row(s), showing first ' + Math.min(5, lines.length - 1)
-      + '</div><table class="mini"><tr>' + head + '</tr>' + body + '</table>';
+    $('csvPreview').innerHTML = '<div class="hint" style="margin-top:8px">' + esc(fileName) + ' — '
+      + (lines.length - 1) + ' data row(s), showing up to 5</div>'
+      + '<table class="mini"><tr>' + head + '</tr>' + body + '</table>';
   }
 
   $('btnImport').onclick = function () {
     setMsg('importStatus', 'Importing…');
     google.script.run.withSuccessHandler(function (r) {
-      setMsg('importStatus',
-        'Imported ' + r.imported + ' · duplicates ' + r.duplicates + ' · suppressed ' + r.suppressed
-        + ' · invalid ' + r.invalid
+      setMsg('importStatus', 'Imported ' + r.imported + ' · duplicates ' + r.duplicates
+        + ' · suppressed ' + r.suppressed + ' · invalid ' + r.invalid
         + (r.invalid ? '\nRows needing attention: ' + r.invalidRows.map(function (x) {
             return x.row + (x.reason ? ' (' + x.reason + ')' : '');
-          }).join(', ') : ''),
-        r.invalid ? 'bad' : 'good');
+          }).join(', ') : ''), r.invalid ? 'bad' : 'good');
     }).withFailureHandler(fail('importStatus')).importRecipientsCsv(currentCampaignId, pendingCsvText);
   };
 
-  // ── 5. launch ─────────────────────────────────────────────────
+  $('btnSuppress').onclick = function () {
+    if (!confirm('Suppression is permanent and global — these addresses will never receive mail from any campaign or sender again.')) return;
+    google.script.run.withSuccessHandler(function (r) {
+      setMsg('suppressStatus', 'Suppressed ' + r.suppressed
+        + (r.invalid.length ? ' · unparsed: ' + r.invalid.join(', ') : ''), 'good');
+      $('suppressText').value = '';
+    }).withFailureHandler(fail('suppressStatus'))
+      .manuallySuppressBulk($('suppressText').value, 'unsubscribe request relayed by sender');
+  };
+  $('btnMarkReplied').onclick = function () {
+    google.script.run.withSuccessHandler(function (r) {
+      setMsg('repliedStatus', 'Updated ' + r.updated + ' row(s).', 'good'); $('repliedEmail').value = '';
+    }).withFailureHandler(fail('repliedStatus')).manuallyMarkReplied(currentCampaignId, $('repliedEmail').value);
+  };
+
+  // ── launch ────────────────────────────────────────────────────
   $('btnPreflight').onclick = function () {
     google.script.run.withSuccessHandler(function (r) {
       $('preflightResults').innerHTML = r.checks.map(function (c) {
         const advisory = c.blocking === false;
         const label = c.ok ? 'PASS' : (advisory ? 'NOTE' : 'BLOCKED');
         const colour = c.ok ? 'var(--good)' : (advisory ? 'var(--warn)' : 'var(--bad)');
-        return '<div style="font-size:12px;color:' + colour + '">' + label + ' — ' + c.name
-          + (c.detail ? ' · ' + c.detail : '') + '</div>';
+        return '<div style="font-size:12px;color:' + colour + '">' + label + ' — ' + esc(c.name)
+          + (c.detail ? ' · ' + esc(c.detail) : '') + '</div>';
       }).join('');
     }).withFailureHandler(function (err) {
-      $('preflightResults').innerHTML = '<div class="msg bad">' + err.message + '</div>';
+      $('preflightResults').innerHTML = '<div class="msg bad">' + esc(err.message) + '</div>';
     }).checkPreflight(currentCampaignId);
   };
-
   $('btnApprove').onclick = function () {
     google.script.run.withSuccessHandler(function () { setMsg('launchStatus', 'Approved.', 'good'); })
       .withFailureHandler(fail('launchStatus')).approveCampaignAsExec(currentCampaignId);
@@ -389,60 +320,100 @@
     }).withFailureHandler(fail('launchStatus')).releaseCanary(currentCampaignId);
   };
 
-  // ── suppression ───────────────────────────────────────────────
-  $('btnSuppress').onclick = function () {
-    if (!confirm('Suppression is permanent and global — these addresses will never receive mail from any campaign or sender again.')) return;
-    google.script.run.withSuccessHandler(function (r) {
-      setMsg('suppressStatus', 'Suppressed ' + r.suppressed
-        + (r.invalid.length ? ' · unparsed: ' + r.invalid.join(', ') : ''), 'good');
-      $('suppressText').value = '';
-    }).withFailureHandler(fail('suppressStatus'))
-      .manuallySuppressBulk($('suppressText').value, 'unsubscribe request relayed by sender');
-  };
-  $('btnMarkReplied').onclick = function () {
-    google.script.run.withSuccessHandler(function (r) {
-      setMsg('repliedStatus', 'Updated ' + r.updated + ' row(s).', 'good'); $('repliedEmail').value = '';
-    }).withFailureHandler(fail('repliedStatus')).manuallyMarkReplied(currentCampaignId, $('repliedEmail').value);
-  };
+  // ── health ────────────────────────────────────────────────────
+  function card(value, label, colour) {
+    return '<div class="card"><b' + (colour ? ' style="color:' + colour + '"' : '') + '>' + esc(value) + '</b>'
+      + '<span>' + esc(label) + '</span></div>';
+  }
 
-  // ── governance + lists ────────────────────────────────────────
+  function refreshHealth() {
+    $('healthAge').textContent = ' loading…';
+    google.script.run.withSuccessHandler(function (h) {
+      const s = h.system;
+      $('healthAge').textContent = ' as of ' + new Date(h.generatedAt).toLocaleTimeString();
+      $('systemCards').innerHTML =
+          card(s.killSwitch ? 'STOPPED' : 'running', 'sending', s.killSwitch ? 'var(--bad)' : 'var(--good)')
+        + card(s.sendersActive + '/' + s.sendersTotal, 'senders live', s.sendersActive ? '' : 'var(--warn)')
+        + card(s.sentAllTime, 'sent all time')
+        + card(s.repliedAllTime + ' (' + s.replyRatePct + '%)', 'replies recorded')
+        + card(s.bouncedAllTime + ' (' + s.bounceRatePct + '%)', 'bounces · halts at ' + s.bounceHaltAt + '%',
+               s.bounceRatePct > s.bounceHaltAt ? 'var(--bad)' : '')
+        + card(s.suppressionCount, 'suppressed')
+        + (s.signalsDegraded ? card(s.signalsDegraded, 'agents without reply detection', 'var(--warn)') : '');
+
+      $('healthSenders').innerHTML = h.senders.length ? h.senders.map(function (x) {
+        const pct = Math.min(100, x.capUsedPct);
+        return '<div class="row"><span>' + esc(x.displayName) + ' &lt;' + esc(x.email) + '&gt;'
+          + '<div class="hint">' + esc(x.transport)
+          + ' · ' + (x.signalsWorking ? '<span style="color:var(--good)">reply detection on</span>'
+                                      : '<span style="color:var(--warn)">reply detection off</span>')
+          + ' · ' + (x.stale ? '<span style="color:var(--bad)">no recent heartbeat</span>' : 'live')
+          + ' · agent ' + esc(x.agentVersion) + ' · ' + esc(x.providerQuota) + ' provider sends left</div>'
+          + '<div class="hint">' + x.sentToday + ' / ' + x.capToday + ' of today\'s cap'
+          + '<div class="bar" style="color:' + (pct > 90 ? 'var(--warn)' : 'var(--good)') + '">'
+          + '<i style="width:' + pct + '%"></i></div></div>'
+          + '</span><span class="pill">' + esc(x.status) + '</span></div>';
+      }).join('') : '<div class="hint">No senders onboarded.</div>';
+
+      $('healthCampaigns').innerHTML = h.campaigns.length ? '<table class="mini">'
+        + '<tr><th>Campaign</th><th>Status</th><th>Total</th><th>Sent</th><th>Replied</th>'
+        + '<th>Bounced</th><th>Opted out</th><th>Failed</th><th>Queued</th><th>Next due</th></tr>'
+        + h.campaigns.map(function (c) {
+          return '<tr><td>' + esc(c.name) + '</td><td>' + esc(c.status) + '</td><td>' + c.total + '</td>'
+            + '<td>' + c.sent + '</td><td>' + c.replied + '</td><td>' + c.bounced + '</td>'
+            + '<td>' + c.unsubscribed + '</td>'
+            + '<td' + (c.failed ? ' style="color:var(--bad)"' : '') + '>' + c.failed + '</td>'
+            + '<td>' + c.pendingSends + '</td>'
+            + '<td>' + (c.nextDue ? new Date(c.nextDue).toLocaleString() : '—') + '</td></tr>';
+        }).join('') + '</table>' : '<div class="hint">No campaigns yet.</div>';
+
+      $('healthFailures').innerHTML = h.failures.length ? '<table class="mini">'
+        + '<tr><th>Queue row</th><th>Sender</th><th>Attempts</th><th>Error</th></tr>'
+        + h.failures.map(function (f) {
+          return '<tr><td>' + esc(f.id) + '</td><td>' + esc(f.sender) + '</td><td>' + esc(f.attempts) + '</td>'
+            + '<td style="white-space:normal;color:var(--bad)">' + esc(f.error) + '</td></tr>';
+        }).join('') + '</table>' : '<div class="hint" style="color:var(--good)">No failures recorded.</div>';
+
+      $('healthEvents').innerHTML = h.events.length ? '<table class="mini">'
+        + '<tr><th>When</th><th>Who</th><th>What</th><th>Detail</th></tr>'
+        + h.events.map(function (e) {
+          return '<tr><td>' + (e.ts ? new Date(e.ts).toLocaleString() : '') + '</td>'
+            + '<td>' + esc(e.actor) + '</td><td>' + esc(e.type) + '</td>'
+            + '<td style="white-space:normal">' + esc(e.detail) + '</td></tr>';
+        }).join('') + '</table>' : '<div class="hint">No events yet.</div>';
+    }).withFailureHandler(function (err) {
+      $('healthAge').textContent = '';
+      $('systemCards').innerHTML = '<div class="msg bad">' + esc(err.message) + '</div>';
+    }).getHealthSnapshot();
+  }
+  $('btnRefreshHealth').onclick = refreshHealth;
+
+  // ── shared chrome ─────────────────────────────────────────────
   function refreshKillSwitch() {
     google.script.run.withSuccessHandler(function (on) {
-      $('killSwitchState').textContent = on ? 'KILL SWITCH ON — nothing sends' : 'sending enabled';
-      $('killSwitchState').style.background = on ? '#f5c2c2' : '#c8f0c8';
-      $('killSwitchState').style.color = '#1a1a1a';
+      const el = $('killSwitchState');
+      el.textContent = on ? 'KILL SWITCH ON' : 'sending enabled';
+      el.style.background = on ? '#f5c2c2' : '#c8f0c8';
+      el.style.color = '#1a1a1a';
     }).getKillSwitchStatus();
   }
   $('btnToggleKill').onclick = function () {
-    google.script.run.withSuccessHandler(refreshKillSwitch).withFailureHandler(fail('governanceStatus'))
-      .setKillSwitch(!$('killSwitchState').textContent.includes('ON'));
+    const on = $('killSwitchState').textContent.indexOf('ON') !== -1;
+    if (!on && !confirm('Stop every sender? Nothing will send until this is turned back on.')) return;
+    google.script.run.withSuccessHandler(refreshKillSwitch).setKillSwitch(!on);
   };
-
-  function refreshSenders() {
-    google.script.run.withSuccessHandler(function (senders) {
-      $('senderList').innerHTML = senders.length ? senders.map(function (s) {
-        const sig = s.signalsWorking
-          ? '<span style="color:var(--good)">reply detection on</span>'
-          : '<span style="color:var(--warn)">reply detection off</span>';
-        return '<div class="row"><span>' + s.displayName + ' &lt;' + s.email + '&gt;'
-          + '<div class="sub">' + s.transport + ' · ' + sig
-          + ' · ' + (s.stale ? '<span style="color:var(--bad)">no recent heartbeat</span>' : 'live')
-          + ' · ' + s.providerQuota + ' sends left today</div></span>'
-          + '<span class="pill">' + s.status + '</span></div>';
-      }).join('') : '<div class="sub">No senders onboarded.</div>';
-    }).senderStatus();
-  }
 
   function refreshCampaigns() {
     google.script.run.withSuccessHandler(function (cs) {
       $('campaignList').innerHTML = cs.length ? cs.map(function (c) {
-        return '<div class="row"><span>' + c.name
-          + '<div class="sub">' + c.id + (c.interval_minutes ? ' · ' + c.interval_minutes + ' min gap' : ' · auto-spaced')
-          + (c.projected_completion ? ' · finishes ' + c.projected_completion : '') + '</div></span>'
-          + '<span class="pill">' + c.status + '</span></div>';
-      }).join('') : '<div class="sub">No campaigns yet.</div>';
+        return '<div class="row"><span>' + esc(c.name) + '<div class="hint">' + esc(c.id)
+          + (c.interval_minutes ? ' · ' + esc(c.interval_minutes) + ' min gap' : ' · auto-spaced')
+          + (c.projected_completion ? ' · finishes ' + esc(c.projected_completion) : '') + '</div></span>'
+          + '<span class="pill">' + esc(c.status) + '</span></div>';
+      }).join('') : '<div class="hint">No campaigns yet.</div>';
     }).listCampaigns();
   }
 
-  refreshKillSwitch(); refreshSenders(); refreshCampaigns();
+  refreshKillSwitch();
+  refreshCampaigns();
 </script>
