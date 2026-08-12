@@ -1,0 +1,7 @@
+email,first_name,last_name,company,title,recipient_tz,intro_html
+edge1@moveinsync.com,Ann-Marie,O'Brien,"Smith, Jones & Co","Director, Facilities",Asia/Kolkata,"<strong>two sites</strong>"
+edge2@moveinsync.com,José,Müller,Ünicode Ltd,VP Operaciones,Europe/Madrid,"<em>expanding</em>"
+edge3@moveinsync.com,Xss,Attempt,<script>alert(1)</script>,"Head of ""Special"" Projects",Asia/Kolkata,plain text no markup
+not-an-email,Broken,Row,No Email Corp,Nobody,Asia/Kolkata,
+edge1@moveinsync.com,Duplicate,Row,Example Corp,VP Engineering,Asia/Kolkata,
+edge4@moveinsync.com,,Missing,First Name Corp,Analyst,Asia/Kolkata,

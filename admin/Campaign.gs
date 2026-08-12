@@ -8,6 +8,21 @@ function newCampaignId_() {
   return 'c' + Utilities.getUuid().split('-')[0];
 }
 
+/**
+ * '' means auto-space: the scheduler spreads the day's cap evenly across the
+ * send window with jitter, which is what a real campaign should almost always
+ * do. An explicit interval overrides that with a fixed gap — useful for a
+ * controlled test ("two mails, five minutes apart") and for small, deliberate
+ * sends. Floored at 1: zero or negative would collapse the whole campaign into
+ * a single instant, which is exactly the burst the pacing exists to prevent.
+ */
+function normalizeInterval_(value) {
+  if (value === '' || value === null || value === undefined) return '';
+  const n = Math.floor(Number(value));
+  if (!isFinite(n) || n < 1) throw new Error('Send interval must be a whole number of minutes, at least 1');
+  return n;
+}
+
 /** input: { name, subject, bodySource, senderPool: [email,...], tzMode: 'sender'|'recipient' } */
 function createCampaign(input) {
   const admin = requireAdmin_();
@@ -20,10 +35,12 @@ function createCampaign(input) {
     name: input.name,
     status: 'draft',
     subject: input.subject,
+    preheader: input.preheader || '',
     body_source: input.bodySource,
     sender_pool: (input.senderPool || []).join(','),
     tz_mode: input.tzMode === 'recipient' ? 'recipient' : 'sender',
     send_window: (SEND_WINDOW.startHour + ':00-' + SEND_WINDOW.endHour + ':00'),
+    interval_minutes: normalizeInterval_(input.intervalMinutes),
     created_by: admin,
     created_at: new Date(),
     exec_approved_by: '',
@@ -48,9 +65,11 @@ function saveCampaignDraft(campaignId, input) {
   const patch = {
     name: input.name,
     subject: input.subject,
+    preheader: input.preheader || '',
     body_source: input.bodySource,
     sender_pool: (input.senderPool || []).join(','),
     tz_mode: input.tzMode === 'recipient' ? 'recipient' : 'sender',
+    interval_minutes: normalizeInterval_(input.intervalMinutes),
     // editing invalidates any prior seed pass — must re-seed before launch
     seed_passed_at: '',
   };
@@ -95,10 +114,12 @@ function previewCampaign(campaignId, sampleOverrides) {
   const extras = previewExtrasForSenderPool_(campaign.sender_pool);
 
   try {
-    const rendered = render_(campaign.body_source, sample, extras);
+    const rendered = render_(campaign.body_source, sample, extras, { preheader: campaign.preheader });
     return {
       ok: true,
-      subject: applyMerge_(campaign.subject, mergeDataForRecipient_(sample, extras)),
+      // Subject is plain text — escaping would show the recipient a literal &amp;
+      subject: applyMerge_(campaign.subject, mergeDataForRecipient_(sample, extras), { escape: false }),
+      preheader: rendered.preheader,
       html: rendered.html,
       text: rendered.text,
       bytes: rendered.bytes,

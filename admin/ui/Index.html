@@ -1,399 +1,448 @@
 <!--
-  Campaign builder. Deliberately plain JS / no framework — this is a 2-3
-  admin internal tool, not a product surface. google.script.run is the only
-  transport; there is no separate REST API to keep in sync.
+  Campaign builder. Plain JS, no framework — this is a 2-3 admin internal tool.
+  google.script.run is the only transport; there is no separate REST API to
+  keep in sync.
+
+  Laid out as numbered steps because the order is not optional: a campaign
+  cannot be seeded before it is saved, cannot launch before it is seeded and
+  approved, and every one of those gates is enforced server-side regardless of
+  what this page allows. The numbering exists so an admin can see where they
+  are, not to replace those checks.
 -->
 <style>
-  :root { color-scheme: light dark; }
-  body { font-family: -apple-system, Arial, sans-serif; margin: 0; padding: 24px; max-width: 1100px; }
-  h1 { font-size: 18px; margin: 0 0 4px; }
-  .sub { color: #666; font-size: 13px; margin-bottom: 20px; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
-  label { display: block; font-size: 12px; font-weight: 600; margin: 12px 0 4px; }
-  input[type=text], textarea, select { width: 100%; box-sizing: border-box; padding: 8px; font-size: 13px;
-    border: 1px solid #ccc; border-radius: 4px; font-family: inherit; }
-  textarea { min-height: 200px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
-  .senders label { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; margin-right: 16px; }
-  button { padding: 8px 14px; border-radius: 4px; border: 1px solid #333; background: #1a1a1a; color: #fff;
-    font-size: 13px; cursor: pointer; margin-right: 8px; margin-top: 8px; }
-  button.secondary { background: #fff; color: #1a1a1a; }
-  button:disabled { opacity: 0.4; cursor: not-allowed; }
-  .panel { border: 1px solid #ddd; border-radius: 6px; padding: 16px; }
-  .tokens { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
-  .token { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #eee; }
-  .byte-count { font-size: 12px; margin-top: 6px; }
-  .byte-count.over { color: #c0392b; font-weight: 600; }
-  .error { color: #c0392b; font-size: 13px; white-space: pre-wrap; }
-  iframe.preview { width: 100%; height: 420px; border: 1px solid #ddd; border-radius: 4px; background: #fff; }
-  .campaign-list { margin-top: 32px; }
-  .campaign-row { padding: 8px 0; border-bottom: 1px solid #eee; font-size: 13px; display: flex; justify-content: space-between; }
-  .status-pill { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #eef; }
+  :root { color-scheme: light dark; --line:#ddd; --muted:#666; --bad:#c0392b; --good:#1a7f37; --warn:#a67c00; }
+  body { font-family: -apple-system, Segoe UI, Arial, sans-serif; margin:0; padding:24px; max-width:1180px; line-height:1.45; }
+  h1 { font-size:19px; margin:0 0 2px; }
+  .sub { color:var(--muted); font-size:13px; }
+  .step { border:1px solid var(--line); border-radius:8px; padding:16px 18px; margin-top:16px; }
+  .step > h2 { font-size:14px; margin:0 0 2px; display:flex; align-items:center; gap:8px; }
+  .num { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px;
+         border-radius:50%; background:#1a1a1a; color:#fff; font-size:12px; flex:none; }
+  .cols { display:grid; grid-template-columns:1fr 1fr; gap:20px; align-items:start; }
+  label { display:block; font-size:12px; font-weight:600; margin:12px 0 4px; }
+  input[type=text], input[type=number], textarea, select {
+    width:100%; box-sizing:border-box; padding:8px; font-size:13px; border:1px solid #ccc;
+    border-radius:4px; font-family:inherit; background:transparent; color:inherit; }
+  textarea { min-height:180px; font-family:ui-monospace, Consolas, monospace; font-size:12px; }
+  button { padding:8px 14px; border-radius:4px; border:1px solid #333; background:#1a1a1a; color:#fff;
+           font-size:13px; cursor:pointer; margin:8px 8px 0 0; }
+  button.secondary { background:transparent; color:inherit; }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  .senders label { display:inline-flex; align-items:center; gap:6px; font-weight:400; margin-right:16px; }
+  .tokens { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0; }
+  .token { font-size:11px; padding:2px 8px; border-radius:10px; background:#8883; }
+  .msg { font-size:12px; margin-top:6px; white-space:pre-wrap; }
+  .msg.bad { color:var(--bad); } .msg.good { color:var(--good); }
+  iframe.preview { width:100%; height:340px; border:1px solid var(--line); border-radius:4px; background:#fff; }
+  .row { padding:7px 0; border-bottom:1px solid #8882; font-size:13px; display:flex; justify-content:space-between; gap:12px; }
+  .pill { font-size:11px; padding:2px 8px; border-radius:10px; background:#8883; white-space:nowrap; }
+  .drop { border:2px dashed #aaa; border-radius:6px; padding:18px; text-align:center; font-size:13px;
+          color:var(--muted); cursor:pointer; }
+  .drop.over { border-color:#1a1a1a; }
+  table.mini { width:100%; border-collapse:collapse; font-size:11px; margin-top:8px; }
+  table.mini td, table.mini th { border:1px solid var(--line); padding:3px 6px; text-align:left;
+                                 max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  code { background:#8882; padding:1px 4px; border-radius:3px; font-size:12px; }
 </style>
 
-<h1>MIS Outreach — Campaign Builder</h1>
-<div class="sub">Signed in as <span id="adminEmail"><?= adminEmail ?></span> · Tier B, primary domain, strict governance</div>
+<h1>MIS Outreach</h1>
+<div class="sub">Signed in as <span id="adminEmail"><?= adminEmail ?></span> · single-touch pilot · sends 09:00–17:00 on business days</div>
 
-<div class="panel" style="margin-bottom:24px">
-  <strong>Governance</strong>
-  <div class="sub">Kill switch stops every sender within one poll cycle (~5 min). Complaint rate has no API — read it off Google Postmaster Tools and enter it here daily.</div>
-  <div>
-    <span id="killSwitchState" class="status-pill">checking…</span>
+<!-- ── Governance ─────────────────────────────────────────────── -->
+<div class="step">
+  <h2><span class="num">!</span> Safety controls</h2>
+  <div class="sub">The kill switch stops every sender within one poll cycle. Complaint rate has no API — read it off Google Postmaster Tools and enter it here.</div>
+  <div style="margin-top:8px">
+    <span id="killSwitchState" class="pill">checking…</span>
     <button id="btnToggleKill" class="secondary">Toggle kill switch</button>
   </div>
+  <div id="senderList" style="margin-top:12px"></div>
+  <div id="governanceStatus" class="msg"></div>
+</div>
+
+<!-- ── 1. Compose ─────────────────────────────────────────────── -->
+<div class="step">
+  <h2><span class="num">1</span> Compose</h2>
+  <div class="cols">
+    <div>
+      <label>Campaign name</label>
+      <input type="text" id="name" placeholder="Q3 platform launch — enterprise leads">
+
+      <label>Subject <span style="font-weight:400;color:var(--muted)">— plain text, merge tags allowed</span></label>
+      <input type="text" id="subject" placeholder="Quick question, {{firstName}}">
+
+      <label>Preheader <span style="font-weight:400;color:var(--muted)">— the grey preview line next to the subject</span></label>
+      <input type="text" id="preheader" placeholder="{{company}} — a quick thought on your ops">
+
+      <label>Send from</label>
+      <div class="senders" id="senders">Loading…</div>
+
+      <div class="cols" style="gap:12px">
+        <div>
+          <label>Scheduling clock</label>
+          <select id="tzMode">
+            <option value="sender">Sender-local (exec's 9–5)</option>
+            <option value="recipient">Recipient-local (each prospect's 9–5)</option>
+          </select>
+        </div>
+        <div>
+          <label>Gap between sends</label>
+          <input type="number" id="intervalMinutes" min="1" placeholder="auto">
+          <div class="sub" style="font-size:11px">Blank = spread evenly across the day with jitter (recommended). A number forces a fixed gap in minutes.</div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <label>Body — HTML</label>
+      <div class="sub" style="margin-bottom:4px">
+        Inline styles only (Gmail strips <code>&lt;style&gt;</code>). <code>{{token}}</code> inserts text safely;
+        <code>{{{token}}}</code> inserts a column's raw HTML. Must contain <code>{{unsubscribe}}</code>.
+      </div>
+      <textarea id="bodySource" placeholder="&lt;p&gt;Hi {{firstName}},&lt;/p&gt;"></textarea>
+      <button id="btnLoadSample" class="secondary">Load sample template</button>
+    </div>
+  </div>
+  <button id="btnSave">Save draft</button>
+  <button id="btnPreview" class="secondary">Preview</button>
+  <div id="saveStatus" class="msg"></div>
+</div>
+
+<!-- ── 2. Preview ─────────────────────────────────────────────── -->
+<div class="step">
+  <h2><span class="num">2</span> Preview</h2>
+  <div class="sub">Rendered by the exact function that sends the real mail — not a separate preview renderer.</div>
+  <div class="cols">
+    <div>
+      <label>Sample values</label>
+      <input type="text" id="sampleFirstName" placeholder="First name" value="Sam">
+      <input type="text" id="sampleCompany" placeholder="Company" value="Example Corp" style="margin-top:6px">
+      <input type="text" id="sampleTitle" placeholder="Title" value="VP Engineering" style="margin-top:6px">
+      <div class="tokens" id="tokens"></div>
+      <div id="previewMeta" class="msg"></div>
+      <div id="previewError" class="msg bad"></div>
+    </div>
+    <div>
+      <iframe class="preview" id="previewFrame"></iframe>
+    </div>
+  </div>
+</div>
+
+<!-- ── 3. Test send ───────────────────────────────────────────── -->
+<div class="step">
+  <h2><span class="num">3</span> Test send</h2>
+  <div class="sub">Goes to the seed mailboxes, ignoring the 9–5 window — check rendering, then confirm. A campaign cannot launch without a confirmed seed pass from the last 24 hours.</div>
+  <button id="btnSeed" class="secondary" disabled>Send test emails</button>
+  <button id="btnMarkSeed" class="secondary" disabled>I checked them — mark passed</button>
+  <div id="seedStatus" class="msg"></div>
+</div>
+
+<!-- ── 4. Recipients ──────────────────────────────────────────── -->
+<div class="step">
+  <h2><span class="num">4</span> Recipients</h2>
+  <div class="sub">
+    Required column: <code>email</code>. Recognised: <code>first_name</code>, <code>last_name</code>,
+    <code>company</code>, <code>title</code>, <code>recipient_tz</code>. Any other column becomes a merge
+    tag of the same name — including columns holding HTML, used via <code>{{{column}}}</code>.
+  </div>
+  <button id="btnTemplate" class="secondary">Download CSV template</button>
+  <div class="drop" id="drop" style="margin-top:10px">Drop a .csv here, or click to choose</div>
+  <input type="file" id="fileInput" accept=".csv,text/csv" style="display:none">
+  <div id="csvPreview"></div>
+  <button id="btnImport" disabled>Import these recipients</button>
+  <div id="importStatus" class="msg"></div>
+</div>
+
+<!-- ── 5. Launch ──────────────────────────────────────────────── -->
+<div class="step">
+  <h2><span class="num">5</span> Preflight &amp; launch</h2>
+  <div class="sub">Every non-advisory check must pass. The canary sends to the first 5 only, so a mistake costs 5 recipients instead of all of them.</div>
+  <button id="btnPreflight" class="secondary">Run preflight</button>
+  <div id="preflightResults" style="margin-top:8px"></div>
   <div style="margin-top:12px">
-    <input type="text" id="complaintSender" placeholder="sender email" style="display:inline-block;width:220px">
-    <input type="text" id="complaintDate" placeholder="YYYY-MM-DD" style="display:inline-block;width:120px">
-    <input type="text" id="complaintPct" placeholder="complaint % (e.g. 0.05)" style="display:inline-block;width:160px">
-    <button id="btnRecordComplaint" class="secondary">Record complaint rate</button>
+    <button id="btnApprove" class="secondary">Approve as exec (signed-in user)</button>
+    <button id="btnLaunchCanary">Launch canary (first 5)</button>
+    <button id="btnReleaseCanary" class="secondary">Release the rest</button>
   </div>
-  <div id="governanceStatus" class="sub"></div>
+  <div id="launchStatus" class="msg"></div>
 </div>
 
-<div class="grid">
-  <div>
-    <label>Campaign name</label>
-    <input type="text" id="name" placeholder="Q3 platform launch — enterprise leads">
-
-    <label>Subject</label>
-    <input type="text" id="subject" placeholder="Quick question, {{firstName}}">
-
-    <label>Sender pool</label>
-    <div class="senders" id="senders">Loading senders…</div>
-
-    <label>Scheduling clock</label>
-    <select id="tzMode">
-      <option value="sender">Sender-local (exec's own 9-5)</option>
-      <option value="recipient">Recipient-local (each prospect's own 9-5)</option>
-    </select>
-
-    <label>Body (constrained HTML — inline styles only, no &lt;style&gt;/&lt;script&gt;)</label>
-    <textarea id="bodySource" placeholder="&lt;p&gt;Hi {{firstName}}, ...&lt;/p&gt;"></textarea>
-
+<!-- ── Suppression ────────────────────────────────────────────── -->
+<div class="step">
+  <h2><span class="num">↯</span> Opt-outs &amp; replies</h2>
+  <div class="sub">Automatic detection needs the Gmail API, which is unavailable — so opt-outs an exec forwards are recorded here. Suppression is permanent and global.</div>
+  <div class="cols">
     <div>
-      <button id="btnSave">Save draft</button>
-      <button id="btnPreview" class="secondary">Preview</button>
+      <label>Suppress permanently — one address per line</label>
+      <textarea id="suppressText" style="min-height:80px" placeholder="someone@prospect.com"></textarea>
+      <button id="btnSuppress">Suppress</button>
+      <div id="suppressStatus" class="msg"></div>
     </div>
-    <div id="saveStatus" class="sub"></div>
-  </div>
-
-  <div class="panel">
-    <strong>Live preview</strong>
-    <div class="sub">Rendered by the exact same function that will send the real mail.</div>
-
-    <label>Sample recipient (preview only)</label>
-    <input type="text" id="sampleFirstName" placeholder="First name" value="Sam">
-    <input type="text" id="sampleCompany" placeholder="Company" value="Example Corp" style="margin-top:6px">
-    <input type="text" id="sampleTitle" placeholder="Title" value="VP Engineering" style="margin-top:6px">
-
-    <div class="tokens" id="tokens"></div>
-    <div id="previewError" class="error"></div>
-    <iframe class="preview" id="previewFrame"></iframe>
-    <div class="byte-count" id="byteCount"></div>
-
     <div>
-      <button id="btnSeed" class="secondary" disabled>Send test emails to seed matrix</button>
-      <button id="btnMarkSeed" class="secondary" disabled>Mark seed pass confirmed</button>
+      <label>Mark as replied</label>
+      <input type="text" id="repliedEmail" placeholder="someone@prospect.com">
+      <button id="btnMarkReplied" class="secondary">Mark replied</button>
+      <div id="repliedStatus" class="msg"></div>
     </div>
-    <div id="seedStatus" class="sub"></div>
   </div>
 </div>
 
-<div class="grid" style="margin-top:24px">
-  <div class="panel">
-    <strong>Recipients</strong>
-    <div class="sub">CSV columns: email, first_name, last_name, company, title, recipient_tz (required only if scheduling clock is recipient-local). Anything else becomes a merge field.</div>
-    <textarea id="csvText" style="min-height:120px" placeholder="email,first_name,company&#10;jane@prospect.com,Jane,Prospect Co"></textarea>
-    <button id="btnImport" class="secondary">Import recipients</button>
-    <div id="importStatus" class="sub"></div>
-  </div>
-
-  <div class="panel">
-    <strong>Preflight &amp; launch</strong>
-    <div class="sub">Every check below is a hard block — a campaign cannot launch until all non-lint checks pass.</div>
-    <button id="btnPreflight" class="secondary">Run preflight check</button>
-    <div id="preflightResults"></div>
-
-    <label style="margin-top:16px">Exec approval</label>
-    <div class="sub">A named sender in the pool must approve before launch (run this while signed in as that sender).</div>
-    <button id="btnApprove" class="secondary">Approve as exec (current signed-in user)</button>
-    <div id="approveStatus" class="sub"></div>
-
-    <div style="margin-top:16px">
-      <button id="btnLaunchCanary">Launch canary (first 5)</button>
-      <button id="btnReleaseCanary" class="secondary">Release remaining after canary review</button>
-    </div>
-    <div id="launchStatus" class="sub"></div>
-  </div>
-</div>
-
-<div class="grid" style="margin-top:24px">
-  <div class="panel">
-    <strong>Sender fleet</strong>
-    <div class="sub">"Signals: no" means that agent cannot detect replies, bounces, or unsubscribes — keep those campaigns single-touch and record opt-outs manually below.</div>
-    <button id="btnRefreshSenders" class="secondary">Refresh</button>
-    <div id="senderList"></div>
-  </div>
-
-  <div class="panel">
-    <strong>Manual suppression</strong>
-    <div class="sub">Permanent and global, exactly like an automatic unsubscribe. Use this whenever an exec forwards an opt-out request. One address per line.</div>
-    <textarea id="suppressText" style="min-height:90px" placeholder="someone@prospect.com&#10;another@prospect.com"></textarea>
-    <button id="btnSuppress">Suppress these permanently</button>
-    <div id="suppressStatus" class="sub"></div>
-
-    <label style="margin-top:16px">Mark as replied</label>
-    <div class="sub">Keeps reply-rate reporting honest while automatic detection is unavailable.</div>
-    <input type="text" id="repliedEmail" placeholder="someone@prospect.com">
-    <button id="btnMarkReplied" class="secondary">Mark replied</button>
-    <div id="repliedStatus" class="sub"></div>
-  </div>
-</div>
-
-<div class="campaign-list">
-  <strong>Campaigns</strong>
+<div class="step">
+  <h2><span class="num">≡</span> Campaigns</h2>
   <div id="campaignList"></div>
 </div>
 
 <script>
   let currentCampaignId = null;
-  let clientConfig = null;
+  let pendingCsvText = null;
 
-  function $(id) { return document.getElementById(id); }
+  const $ = function (id) { return document.getElementById(id); };
+  const setMsg = function (id, text, cls) {
+    const el = $(id); el.textContent = text; el.className = 'msg' + (cls ? ' ' + cls : '');
+  };
+  const fail = function (id) { return function (err) { setMsg(id, 'Error: ' + err.message, 'bad'); }; };
 
+  // ── config ────────────────────────────────────────────────────
   google.script.run.withSuccessHandler(function (cfg) {
-    clientConfig = cfg;
     $('senders').innerHTML = cfg.senderPool.length
       ? cfg.senderPool.map(function (s) {
-          return '<label><input type="checkbox" value="' + s.email + '"> ' + s.displayName + '</label>';
+          return '<label><input type="checkbox" value="' + s.email + '" checked> ' + s.displayName + '</label>';
         }).join('')
-      : '<span class="sub">No senders configured yet in SENDER_POOL (shared/Config.gs).</span>';
-    if (cfg.seedMailboxCount === 0) {
-      $('btnSeed').title = 'SEED_MAILBOXES is empty — configure the seed matrix first';
-    }
+      : '<span class="sub">No senders in SENDER_POOL (shared/Config.gs).</span>';
+    if (!cfg.seedMailboxCount) $('btnSeed').title = 'SEED_MAILBOXES is empty';
   }).getClientConfig();
 
-  function selectedSenders() {
+  const selectedSenders = function () {
     return Array.from(document.querySelectorAll('#senders input:checked')).map(function (c) { return c.value; });
-  }
-
-  function currentInput() {
+  };
+  const currentInput = function () {
     return {
-      name: $('name').value,
-      subject: $('subject').value,
-      bodySource: $('bodySource').value,
-      senderPool: selectedSenders(),
-      tzMode: $('tzMode').value,
+      name: $('name').value, subject: $('subject').value, preheader: $('preheader').value,
+      bodySource: $('bodySource').value, senderPool: selectedSenders(),
+      tzMode: $('tzMode').value, intervalMinutes: $('intervalMinutes').value,
     };
-  }
+  };
+
+  // ── 1. compose ────────────────────────────────────────────────
+  $('btnLoadSample').onclick = function () {
+    $('subject').value = $('subject').value || 'Quick question, {{firstName}}';
+    $('preheader').value = $('preheader').value || '{{company}} — a quick thought';
+    $('bodySource').value =
+      '<p>Hi {{firstName}},</p>\n' +
+      '<p>I noticed {{company}} is scaling its team — most {{title}}s we speak to are\n' +
+      'wrestling with the same commute-cost question at that point.</p>\n' +
+      '<p>Worth a short conversation?</p>\n' +
+      '<p>Vyom</p>\n' +
+      '<p style="color:#888;font-size:12px">Not relevant? Reply or write to {{unsubscribe}} and I will not contact you again.<br>\n' +
+      'MoveInSync, Bengaluru, India</p>';
+    setMsg('saveStatus', 'Sample loaded — edit it, then save.', 'good');
+  };
 
   $('btnSave').onclick = function () {
-    $('saveStatus').textContent = 'Saving…';
-    const input = currentInput();
+    setMsg('saveStatus', 'Saving…');
     const done = function (id) {
       currentCampaignId = id;
-      $('saveStatus').textContent = 'Saved (' + id + ')';
+      setMsg('saveStatus', 'Saved as ' + id + '. Preview it, then send a test.', 'good');
       $('btnSeed').disabled = false;
-      refreshCampaignList();
+      $('btnImport').disabled = !pendingCsvText;
+      refreshCampaigns();
+      doPreview();
     };
     if (currentCampaignId) {
       google.script.run.withSuccessHandler(function () { done(currentCampaignId); })
-        .withFailureHandler(showSaveError_)
-        .saveCampaignDraft(currentCampaignId, input);
+        .withFailureHandler(fail('saveStatus')).saveCampaignDraft(currentCampaignId, currentInput());
     } else {
-      google.script.run.withSuccessHandler(done).withFailureHandler(showSaveError_).createCampaign(input);
+      google.script.run.withSuccessHandler(done).withFailureHandler(fail('saveStatus')).createCampaign(currentInput());
     }
   };
 
-  function showSaveError_(err) { $('saveStatus').textContent = 'Error: ' + err.message; }
+  // ── 2. preview ────────────────────────────────────────────────
+  function doPreview() {
+    if (!currentCampaignId) { setMsg('previewError', 'Save the draft first.', 'bad'); return; }
+    google.script.run.withSuccessHandler(function (r) {
+      $('tokens').innerHTML = (r.tokensInBody || [])
+        .map(function (t) { return '<span class="token">{{' + t + '}}</span>'; }).join('');
+      if (!r.ok) {
+        setMsg('previewError', r.error, 'bad');
+        $('previewFrame').srcdoc = ''; setMsg('previewMeta', '');
+        return;
+      }
+      setMsg('previewError', '');
+      $('previewFrame').srcdoc = r.html;
+      const over = r.bytes >= r.maxBytes;
+      setMsg('previewMeta',
+        'Subject: ' + r.subject + '\nPreheader: ' + (r.preheader || '(none)')
+        + '\n' + r.bytes + ' / ' + r.maxBytes + ' bytes' + (over ? '  — OVER LIMIT, Gmail will clip this' : ''),
+        over ? 'bad' : '');
+    }).withFailureHandler(fail('previewError')).previewCampaign(currentCampaignId, {
+      first_name: $('sampleFirstName').value, company: $('sampleCompany').value,
+      title: $('sampleTitle').value, custom: {},
+    });
+  }
+  $('btnPreview').onclick = doPreview;
 
-  $('btnPreview').onclick = function () {
-    if (!currentCampaignId) { $('previewError').textContent = 'Save the draft first.'; return; }
-    const overrides = {
-      first_name: $('sampleFirstName').value,
-      company: $('sampleCompany').value,
-      title: $('sampleTitle').value,
-      custom: {},
+  // ── 3. seed ───────────────────────────────────────────────────
+  $('btnSeed').onclick = function () {
+    setMsg('seedStatus', 'Queuing…');
+    google.script.run.withSuccessHandler(function () {
+      setMsg('seedStatus', 'Queued. They send on the next agent poll — check the seed inboxes before marking passed.', 'good');
+      $('btnMarkSeed').disabled = false;
+    }).withFailureHandler(fail('seedStatus')).enqueueSeedSend(currentCampaignId);
+  };
+  $('btnMarkSeed').onclick = function () {
+    if (!confirm('Confirm you have opened the seed mailboxes and the rendering looked correct?')) return;
+    google.script.run.withSuccessHandler(function () {
+      setMsg('seedStatus', 'Seed pass recorded — valid for 24 hours.', 'good');
+      refreshCampaigns();
+    }).withFailureHandler(fail('seedStatus')).markSeedPassed(currentCampaignId);
+  };
+
+  // ── 4. recipients ─────────────────────────────────────────────
+  $('btnTemplate').onclick = function () {
+    const csv = 'email,first_name,last_name,company,title,recipient_tz,intro_html\n'
+      + 'sam@example.com,Sam,Prospect,Example Corp,VP Engineering,Asia/Kolkata,"<strong>scaling fast</strong>"\n';
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = 'outreach-recipients-template.csv'; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const drop = $('drop');
+  drop.onclick = function () { $('fileInput').click(); };
+  drop.ondragover = function (e) { e.preventDefault(); drop.classList.add('over'); };
+  drop.ondragleave = function () { drop.classList.remove('over'); };
+  drop.ondrop = function (e) {
+    e.preventDefault(); drop.classList.remove('over');
+    if (e.dataTransfer.files.length) readCsv(e.dataTransfer.files[0]);
+  };
+  $('fileInput').onchange = function (e) { if (e.target.files.length) readCsv(e.target.files[0]); };
+
+  // Read client-side and send the text: google.script.run cannot take a File,
+  // and a CSV small enough to paste is small enough to pass as a string.
+  function readCsv(file) {
+    const reader = new FileReader();
+    reader.onload = function () {
+      pendingCsvText = reader.result;
+      renderCsvPreview(file.name, pendingCsvText);
+      $('btnImport').disabled = !currentCampaignId;
+      if (!currentCampaignId) setMsg('importStatus', 'Save the campaign first, then import.', 'bad');
     };
-    google.script.run.withSuccessHandler(renderPreview_).withFailureHandler(function (err) {
-      $('previewError').textContent = err.message;
-    }).previewCampaign(currentCampaignId, overrides);
-  };
-
-  function renderPreview_(result) {
-    $('tokens').innerHTML = (result.tokensInBody || [])
-      .map(function (t) { return '<span class="token">{{' + t + '}}</span>'; }).join('');
-    if (!result.ok) {
-      $('previewError').textContent = result.error;
-      $('previewFrame').srcdoc = '';
-      $('byteCount').textContent = '';
-      return;
-    }
-    $('previewError').textContent = '';
-    $('previewFrame').srcdoc = result.html;
-    const over = result.bytes >= result.maxBytes;
-    $('byteCount').className = 'byte-count' + (over ? ' over' : '');
-    $('byteCount').textContent = result.bytes + ' / ' + result.maxBytes + ' bytes'
-      + (over ? '  — OVER LIMIT, Gmail will clip this message' : '');
+    reader.readAsText(file);
   }
 
-  $('btnSeed').onclick = function () {
-    $('seedStatus').textContent = 'Queuing seed send…';
-    google.script.run.withSuccessHandler(function () {
-      $('seedStatus').textContent = 'Seed jobs queued. They will send once a sender agent polls (Stage 4). Check all 6 seed inboxes before marking passed.';
-      $('btnMarkSeed').disabled = false;
-    }).withFailureHandler(function (err) {
-      $('seedStatus').textContent = 'Error: ' + err.message;
-    }).enqueueSeedSend(currentCampaignId);
-  };
-
-  $('btnMarkSeed').onclick = function () {
-    if (!confirm('Confirm you have visually checked all seed mailboxes and rendering looked correct?')) return;
-    google.script.run.withSuccessHandler(function () {
-      $('seedStatus').textContent = 'Seed pass recorded. Campaign can proceed to canary release.';
-      refreshCampaignList();
-    }).withFailureHandler(function (err) {
-      $('seedStatus').textContent = 'Error: ' + err.message;
-    }).markSeedPassed(currentCampaignId);
-  };
-
-  function requireCampaign_(statusEl) {
-    if (!currentCampaignId) { statusEl.textContent = 'Save the draft first.'; return false; }
-    return true;
+  function renderCsvPreview(fileName, text) {
+    const lines = text.split(/\r?\n/).filter(function (l) { return l.trim(); });
+    const cells = lines.slice(0, 6).map(function (l) { return l.split(','); });
+    const head = (cells[0] || []).map(function (h) { return '<th>' + h + '</th>'; }).join('');
+    const body = cells.slice(1).map(function (r) {
+      return '<tr>' + r.map(function (c) { return '<td>' + c + '</td>'; }).join('') + '</tr>';
+    }).join('');
+    $('csvPreview').innerHTML = '<div class="sub" style="margin-top:8px">' + fileName + ' — '
+      + (lines.length - 1) + ' data row(s), showing first ' + Math.min(5, lines.length - 1)
+      + '</div><table class="mini"><tr>' + head + '</tr>' + body + '</table>';
   }
 
   $('btnImport').onclick = function () {
-    if (!requireCampaign_($('importStatus'))) return;
-    $('importStatus').textContent = 'Importing…';
+    setMsg('importStatus', 'Importing…');
     google.script.run.withSuccessHandler(function (r) {
-      $('importStatus').textContent = 'Imported ' + r.imported + ' · duplicates ' + r.duplicates
-        + ' · suppressed ' + r.suppressed + ' · invalid ' + r.invalid
-        + (r.invalid ? ' (see rows: ' + r.invalidRows.map(function (x) { return x.row; }).join(',') + ')' : '');
-    }).withFailureHandler(function (err) {
-      $('importStatus').textContent = 'Error: ' + err.message;
-    }).importRecipientsCsv(currentCampaignId, $('csvText').value);
+      setMsg('importStatus',
+        'Imported ' + r.imported + ' · duplicates ' + r.duplicates + ' · suppressed ' + r.suppressed
+        + ' · invalid ' + r.invalid
+        + (r.invalid ? '\nRows needing attention: ' + r.invalidRows.map(function (x) {
+            return x.row + (x.reason ? ' (' + x.reason + ')' : '');
+          }).join(', ') : ''),
+        r.invalid ? 'bad' : 'good');
+    }).withFailureHandler(fail('importStatus')).importRecipientsCsv(currentCampaignId, pendingCsvText);
   };
 
+  // ── 5. launch ─────────────────────────────────────────────────
   $('btnPreflight').onclick = function () {
-    if (!requireCampaign_($('preflightResults'))) return;
-    google.script.run.withSuccessHandler(function (result) {
-      $('preflightResults').innerHTML = result.checks.map(function (c) {
-        const label = c.ok ? 'PASS' : (c.blocking === false ? 'WARN' : 'FAIL');
-        const color = c.ok ? '#2a7a2a' : (c.blocking === false ? '#a67c00' : '#c0392b');
-        return '<div style="font-size:12px;color:' + color + '">' + label + ' — ' + c.name
-          + (c.detail ? ' (' + c.detail + ')' : '') + '</div>';
+    google.script.run.withSuccessHandler(function (r) {
+      $('preflightResults').innerHTML = r.checks.map(function (c) {
+        const advisory = c.blocking === false;
+        const label = c.ok ? 'PASS' : (advisory ? 'NOTE' : 'BLOCKED');
+        const colour = c.ok ? 'var(--good)' : (advisory ? 'var(--warn)' : 'var(--bad)');
+        return '<div style="font-size:12px;color:' + colour + '">' + label + ' — ' + c.name
+          + (c.detail ? ' · ' + c.detail : '') + '</div>';
       }).join('');
     }).withFailureHandler(function (err) {
-      $('preflightResults').innerHTML = '<div class="error">' + err.message + '</div>';
+      $('preflightResults').innerHTML = '<div class="msg bad">' + err.message + '</div>';
     }).checkPreflight(currentCampaignId);
   };
 
   $('btnApprove').onclick = function () {
-    if (!requireCampaign_($('approveStatus'))) return;
-    google.script.run.withSuccessHandler(function () {
-      $('approveStatus').textContent = 'Approved.';
-    }).withFailureHandler(function (err) {
-      $('approveStatus').textContent = 'Error: ' + err.message;
-    }).approveCampaignAsExec(currentCampaignId);
+    google.script.run.withSuccessHandler(function () { setMsg('launchStatus', 'Approved.', 'good'); })
+      .withFailureHandler(fail('launchStatus')).approveCampaignAsExec(currentCampaignId);
   };
-
   $('btnLaunchCanary').onclick = function () {
-    if (!requireCampaign_($('launchStatus'))) return;
-    if (!confirm('Launch the canary send (first 5 real recipients)? This cannot be undone.')) return;
-    $('launchStatus').textContent = 'Launching canary…';
+    if (!confirm('Launch the canary — real mail to the first 5 real recipients. This cannot be undone.')) return;
+    setMsg('launchStatus', 'Launching…');
     google.script.run.withSuccessHandler(function () {
-      $('launchStatus').textContent = 'Canary launched. Review real sends before releasing the rest.';
-      refreshCampaignList();
-    }).withFailureHandler(function (err) {
-      $('launchStatus').textContent = 'Error: ' + err.message;
-    }).launchCampaignCanary(currentCampaignId);
+      setMsg('launchStatus', 'Canary launched. Review what actually went out before releasing the rest.', 'good');
+      refreshCampaigns();
+    }).withFailureHandler(fail('launchStatus')).launchCampaignCanary(currentCampaignId);
   };
-
   $('btnReleaseCanary').onclick = function () {
-    if (!requireCampaign_($('launchStatus'))) return;
-    if (!confirm('Release the remaining recipients into the send queue?')) return;
-    $('launchStatus').textContent = 'Releasing…';
+    if (!confirm('Release every remaining recipient into the send queue?')) return;
     google.script.run.withSuccessHandler(function () {
-      $('launchStatus').textContent = 'Remaining recipients scheduled.';
-      refreshCampaignList();
-    }).withFailureHandler(function (err) {
-      $('launchStatus').textContent = 'Error: ' + err.message;
-    }).releaseCanary(currentCampaignId);
+      setMsg('launchStatus', 'Remaining recipients scheduled.', 'good'); refreshCampaigns();
+    }).withFailureHandler(fail('launchStatus')).releaseCanary(currentCampaignId);
   };
 
-  function refreshCampaignList() {
-    google.script.run.withSuccessHandler(function (campaigns) {
-      $('campaignList').innerHTML = campaigns.map(function (c) {
-        return '<div class="campaign-row"><span>' + c.name + '</span>'
-          + '<span class="status-pill">' + c.status + '</span></div>';
-      }).join('') || '<div class="sub">No campaigns yet.</div>';
-    }).listCampaigns();
-  }
+  // ── suppression ───────────────────────────────────────────────
+  $('btnSuppress').onclick = function () {
+    if (!confirm('Suppression is permanent and global — these addresses will never receive mail from any campaign or sender again.')) return;
+    google.script.run.withSuccessHandler(function (r) {
+      setMsg('suppressStatus', 'Suppressed ' + r.suppressed
+        + (r.invalid.length ? ' · unparsed: ' + r.invalid.join(', ') : ''), 'good');
+      $('suppressText').value = '';
+    }).withFailureHandler(fail('suppressStatus'))
+      .manuallySuppressBulk($('suppressText').value, 'unsubscribe request relayed by sender');
+  };
+  $('btnMarkReplied').onclick = function () {
+    google.script.run.withSuccessHandler(function (r) {
+      setMsg('repliedStatus', 'Updated ' + r.updated + ' row(s).', 'good'); $('repliedEmail').value = '';
+    }).withFailureHandler(fail('repliedStatus')).manuallyMarkReplied(currentCampaignId, $('repliedEmail').value);
+  };
 
-  function refreshKillSwitch_() {
+  // ── governance + lists ────────────────────────────────────────
+  function refreshKillSwitch() {
     google.script.run.withSuccessHandler(function (on) {
-      $('killSwitchState').textContent = on ? 'KILL SWITCH ON — nothing is sending' : 'sending enabled';
+      $('killSwitchState').textContent = on ? 'KILL SWITCH ON — nothing sends' : 'sending enabled';
       $('killSwitchState').style.background = on ? '#f5c2c2' : '#c8f0c8';
+      $('killSwitchState').style.color = '#1a1a1a';
     }).getKillSwitchStatus();
   }
-
   $('btnToggleKill').onclick = function () {
-    google.script.run.withSuccessHandler(function () {
-      refreshKillSwitch_();
-    }).withFailureHandler(function (err) {
-      $('governanceStatus').textContent = 'Error: ' + err.message;
-    }).setKillSwitch(!$('killSwitchState').textContent.includes('ON'));
+    google.script.run.withSuccessHandler(refreshKillSwitch).withFailureHandler(fail('governanceStatus'))
+      .setKillSwitch(!$('killSwitchState').textContent.includes('ON'));
   };
 
-  $('btnRecordComplaint').onclick = function () {
-    google.script.run.withSuccessHandler(function () {
-      $('governanceStatus').textContent = 'Recorded.';
-      refreshKillSwitch_();
-    }).withFailureHandler(function (err) {
-      $('governanceStatus').textContent = 'Error: ' + err.message;
-    }).recordComplaintRate($('complaintSender').value, $('complaintDate').value, parseFloat($('complaintPct').value));
-  };
-
-  function refreshSenders_() {
+  function refreshSenders() {
     google.script.run.withSuccessHandler(function (senders) {
       $('senderList').innerHTML = senders.length ? senders.map(function (s) {
-        const beat = s.stale ? '<span style="color:#c0392b">stale</span>' : 'live';
         const sig = s.signalsWorking
-          ? '<span style="color:#1a7f37">signals: yes</span>'
-          : '<span style="color:#a67c00">signals: no</span>';
-        return '<div class="campaign-row"><span>' + s.displayName + ' &lt;' + s.email + '&gt;'
-          + '<div class="sub" style="margin:0">' + s.transport + ' · ' + sig + ' · ' + beat
-          + ' · quota ' + s.providerQuota + '</div></span>'
-          + '<span class="status-pill">' + s.status + '</span></div>';
-      }).join('') : '<div class="sub">No senders onboarded yet.</div>';
-    }).withFailureHandler(function (err) {
-      $('senderList').innerHTML = '<div class="error">' + err.message + '</div>';
+          ? '<span style="color:var(--good)">reply detection on</span>'
+          : '<span style="color:var(--warn)">reply detection off</span>';
+        return '<div class="row"><span>' + s.displayName + ' &lt;' + s.email + '&gt;'
+          + '<div class="sub">' + s.transport + ' · ' + sig
+          + ' · ' + (s.stale ? '<span style="color:var(--bad)">no recent heartbeat</span>' : 'live')
+          + ' · ' + s.providerQuota + ' sends left today</div></span>'
+          + '<span class="pill">' + s.status + '</span></div>';
+      }).join('') : '<div class="sub">No senders onboarded.</div>';
     }).senderStatus();
   }
 
-  $('btnRefreshSenders').onclick = refreshSenders_;
+  function refreshCampaigns() {
+    google.script.run.withSuccessHandler(function (cs) {
+      $('campaignList').innerHTML = cs.length ? cs.map(function (c) {
+        return '<div class="row"><span>' + c.name
+          + '<div class="sub">' + c.id + (c.interval_minutes ? ' · ' + c.interval_minutes + ' min gap' : ' · auto-spaced')
+          + (c.projected_completion ? ' · finishes ' + c.projected_completion : '') + '</div></span>'
+          + '<span class="pill">' + c.status + '</span></div>';
+      }).join('') : '<div class="sub">No campaigns yet.</div>';
+    }).listCampaigns();
+  }
 
-  $('btnSuppress').onclick = function () {
-    if (!confirm('Suppression is permanent and global. These addresses will never receive mail from any campaign or sender again. Continue?')) return;
-    $('suppressStatus').textContent = 'Suppressing…';
-    google.script.run.withSuccessHandler(function (r) {
-      $('suppressStatus').textContent = 'Suppressed ' + r.suppressed
-        + (r.invalid.length ? ' · could not parse: ' + r.invalid.join(', ') : '');
-      $('suppressText').value = '';
-    }).withFailureHandler(function (err) {
-      $('suppressStatus').textContent = 'Error: ' + err.message;
-    }).manuallySuppressBulk($('suppressText').value, 'unsubscribe request relayed by sender');
-  };
-
-  $('btnMarkReplied').onclick = function () {
-    google.script.run.withSuccessHandler(function (r) {
-      $('repliedStatus').textContent = 'Updated ' + r.updated + ' recipient row(s).';
-      $('repliedEmail').value = '';
-    }).withFailureHandler(function (err) {
-      $('repliedStatus').textContent = 'Error: ' + err.message;
-    }).manuallyMarkReplied(currentCampaignId, $('repliedEmail').value);
-  };
-
-  refreshKillSwitch_();
-  refreshSenders_();
-  refreshCampaignList();
+  refreshKillSwitch(); refreshSenders(); refreshCampaigns();
 </script>

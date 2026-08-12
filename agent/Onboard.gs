@@ -71,12 +71,29 @@ function ensureLabelsAndFilters_() {
   ensureFilter_({ to: unsubscribeAddress_() }, 'Outreach/Unsubscribes', { skipInbox: true });
 }
 
+/**
+ * Apps Script exposes no way to read an existing trigger's interval, so the
+ * configured value is recorded alongside it. Without that, changing
+ * AGENT_POLL_MINUTES would silently do nothing on every already-onboarded
+ * agent — the trigger exists, so the old code returned early and left the old
+ * interval running forever.
+ */
 function ensureAgentTrigger_() {
-  const existing = ScriptApp.getProjectTriggers().some(function (t) {
+  const allowed = [1, 5, 10, 15, 30];
+  if (allowed.indexOf(AGENT_POLL_MINUTES) === -1) {
+    throw new Error('AGENT_POLL_MINUTES must be one of ' + allowed.join(', ') + ', got ' + AGENT_POLL_MINUTES);
+  }
+  const props = PropertiesService.getScriptProperties();
+  const desired = String(AGENT_POLL_MINUTES);
+  const existing = ScriptApp.getProjectTriggers().filter(function (t) {
     return t.getHandlerFunction() === 'tick';
   });
-  if (existing) return;
-  ScriptApp.newTrigger('tick').timeBased().everyMinutes(5).create();
+
+  if (existing.length === 1 && props.getProperty('TRIGGER_MINUTES') === desired) return;
+
+  existing.forEach(function (t) { ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('tick').timeBased().everyMinutes(AGENT_POLL_MINUTES).create();
+  props.setProperty('TRIGGER_MINUTES', desired);
 }
 
 /** For an exec who wants to stop entirely — instant, unilateral, no admin involvement (README/ARCHITECTURE promise). */

@@ -24,9 +24,25 @@ function scheduleForSender_(campaign, senderEmail, recipients) {
   }).length;
 
   const windowMinutes = (SEND_WINDOW.endHour - SEND_WINDOW.startHour) * 60;
+  const interval = campaign.interval_minutes ? Number(campaign.interval_minutes) : null;
+
   const capLookup = function (dayOffset) {
     const day = businessDayOffset_(new Date(), dayOffset);
-    return capForSenderToday_(senderRow.ramp_start_date, day, DAILY_CAP_RAMP, senderRow.daily_cap_override || null);
+    const cap = capForSenderToday_(senderRow.ramp_start_date, day, DAILY_CAP_RAMP, senderRow.daily_cap_override || null);
+    // A fixed interval can be the tighter constraint: at 60-minute spacing an
+    // 8-hour window physically holds 9 sends, however high the cap is.
+    return interval ? Math.min(cap, slotsPerWindow_(interval, windowMinutes)) : cap;
+  };
+
+  /**
+   * Interval mode anchors on "now" for today only, so a campaign launched
+   * mid-window starts immediately rather than at slots already in the past.
+   * Later days start at the top of the window as usual.
+   */
+  const anchorFor_ = function (dayOffset, timeZone) {
+    if (!interval || dayOffset > 0) return 0;
+    const nowLocal = localMinutes_(new Date(), timeZone, formatInZoneViaUtilities_);
+    return Math.max(0, nowLocal - SEND_WINDOW.startHour * 60);
   };
 
   let lastDue = null;
@@ -35,11 +51,13 @@ function scheduleForSender_(campaign, senderEmail, recipients) {
     const globalIndex = alreadyQueued + idx;
     const slot = scheduleSlotForIndex_(globalIndex, capLookup);
     const sendDate = businessDayOffset_(new Date(), slot.dayOffset);
-    const minuteOffset = jitteredSlotMinutes_(slot.slotIndex, windowMinutes, slot.capThatDay, 0.4);
     const timeZone = campaign.tz_mode === 'recipient' ? recipient.recipient_tz : senderRow.timezone;
     if (!timeZone) {
       throw new Error('No timezone available for recipient ' + recipient.email + ' (tz_mode=' + campaign.tz_mode + ')');
     }
+    const minuteOffset = interval
+      ? fixedIntervalMinutes_(slot.slotIndex, interval, anchorFor_(slot.dayOffset, timeZone))
+      : jitteredSlotMinutes_(slot.slotIndex, windowMinutes, slot.capThatDay, 0.4);
     const dueAt = dueAtUtcForSlot_(sendDate, SEND_WINDOW.startHour, minuteOffset, timeZone, formatInZoneViaUtilities_);
 
     appendRow_('Queue', {

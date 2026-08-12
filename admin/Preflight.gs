@@ -39,6 +39,26 @@ function runPreflight_(campaign) {
     pass('sender_pool_assigned');
   }
 
+  if (campaign.interval_minutes) {
+    const interval = Number(campaign.interval_minutes);
+    const windowMinutes = (SEND_WINDOW.endHour - SEND_WINDOW.startHour) * 60;
+    const perDay = slotsPerWindow_(interval, windowMinutes);
+    // Not an error — the scheduler already rolls the overflow to the next
+    // business day — but an admin asking for 60-minute spacing should be told
+    // the campaign now spans a week rather than discovering it afterwards.
+    checks.push({
+      name: 'interval_capacity', ok: true, blocking: false,
+      detail: interval + ' min spacing fits ' + perDay + ' send(s) per sender per day',
+    });
+    if (interval < AGENT_POLL_MINUTES) {
+      checks.push({
+        name: 'interval_below_poll_resolution', ok: false, blocking: false,
+        detail: 'Interval of ' + interval + ' min is finer than the ' + AGENT_POLL_MINUTES
+          + ' min agent poll — actual gaps will vary by up to ' + AGENT_POLL_MINUTES + ' min',
+      });
+    }
+  }
+
   const sample = { first_name: 'Sam', last_name: 'Prospect', company: 'Example Corp', title: 'VP Engineering', custom: {} };
   // {{unsubscribe}} is supplied by the sending agent, not the recipient row.
   // Derived from the campaign's own sender pool so preflight validates against

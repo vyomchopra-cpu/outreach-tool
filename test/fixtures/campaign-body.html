@@ -1,0 +1,33 @@
+<!--
+  Sample campaign body for the two-send test. Paste into the console's Body
+  field. Deliberately exercises every merge form at once:
+
+    {{firstName}}    escaped text from a recognised column
+    {{company}}      escaped text — the Smith, Jones & Co row proves the & is
+                     escaped to &amp; in HTML and decoded back in plain text
+    {{title}}        escaped text
+    {{{intro_html}}} RAW HTML from an arbitrary CSV column
+    {{unsubscribe}}  supplied by the sending agent, not the CSV
+
+  Constraints this stays inside, all enforced by preflight:
+    - inline styles only (Gmail strips <style>)
+    - no images, no attachments in first-touch content
+    - at most one link
+    - a physical address, because the law requires one
+-->
+<p>Hi {{firstName}},</p>
+
+<p>I noticed {{company}} is {{{intro_html}}} &mdash; most {{title}}s we talk to
+hit the same commute-cost question right about then.</p>
+
+<p>We run employee transport for a few hundred companies, and the pattern is
+consistent: the spend is visible, the utilisation is not.</p>
+
+<p>Worth fifteen minutes to compare notes?</p>
+
+<p>Vyom<br>MoveInSync</p>
+
+<p style="color:#888888;font-size:12px;line-height:1.4;">
+  Not relevant? Reply to this message, or write to {{unsubscribe}}, and I will not contact you again.<br>
+  MoveInSync Technologies, Bengaluru, Karnataka, India
+</p>

@@ -1,0 +1,3 @@
+email,first_name,last_name,company,title,recipient_tz,intro_html
+REPLACE-ME-1@moveinsync.com,Sam,Prospect,Example Corp,VP Engineering,Asia/Kolkata,"<strong>scaling quickly</strong>"
+REPLACE-ME-2@moveinsync.com,Alex,Tester,Beta Industries,Head of Operations,Asia/Kolkata,"<em>opening a second site</em>"

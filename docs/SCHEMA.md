@@ -23,16 +23,19 @@ Column order below is authoritative — `Store.gs` bootstraps headers from it an
 | `last_heartbeat` | datetime | No beat for 30 min → `offline` + alert |
 | `secret_hash` | string | SHA-256 of the onboarding shared secret. Never the secret itself. |
 | `consent_recorded_at` | datetime | See `docs/EXEC_CONSENT.md` |
+| `capabilities` | json | Reported by the agent every heartbeat: transport in use, whether the Gmail API (and so reply detection) is reachable, remaining provider quota. Makes a degraded agent visible instead of inferred from missing `Signals` rows. |
 
 ## `Campaigns`
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | string | `c47` style; also the plus-alias tag in `Reply-To` |
+| `id` | string | `c47` style |
 | `name` | string | |
 | `status` | enum | `draft` · `preflight_passed` · `canary` · `running` · `paused` · `completed` · `halted` |
-| `subject` | string | Merge tags allowed |
-| `body_source` | text | Single source of truth. Renderer produces both HTML and plain text from this. |
+| `subject` | string | Merge tags allowed. Merged **unescaped** — it is plain text, so `&amp;` would be shown literally. |
+| `preheader` | string | The grey preview line beside the subject. Own template, own merge tags. Rendered into a hidden, escaped, padded block; excluded from the plain-text part. |
+| `body_source` | text | Single source of truth. Renderer produces both HTML and plain text from this. `{{token}}` is HTML-escaped; `{{{token}}}` inserts raw HTML. |
+| `interval_minutes` | int? | Blank = auto-space the day's cap across the window with jitter. A number forces a fixed gap, anchored at launch time on day one. Capped by what the window physically fits. |
 | `sender_pool` | csv | Sender emails assigned to this campaign |
 | `tz_mode` | enum | `sender` · `recipient` — per-campaign, chosen in the builder |
 | `send_window` | string | Default `09:00-17:00` |

@@ -16,12 +16,24 @@
  * Throws (via applyMerge_) if any {{token}} in bodySource has no value on
  * this recipient — callers must treat that as a hard send-block, not a warning.
  */
-function render_(bodySource, recipient, extras) {
-  const merged = applyMerge_(bodySource, mergeDataForRecipient_(recipient, extras));
-  const html = wrapHtml_(merged);
+function render_(bodySource, recipient, extras, options) {
+  const data = mergeDataForRecipient_(recipient, extras);
+  const merged = applyMerge_(bodySource, data);
+
+  // The preheader is its own template (Campaigns.preheader) and may carry its
+  // own merge tags — commonly {{preheader}} straight from a CSV column, but
+  // anything else works too. Merged in a text context: it is never rendered as
+  // markup, only escaped into a hidden block by wrapHtml_.
+  const preheaderSource = (options && options.preheader) || '';
+  const preheader = preheaderSource ? applyMerge_(preheaderSource, data, { escape: false }) : '';
+
+  const html = wrapHtml_(merged, preheader);
+  // Deliberately derived from the body only. The preheader is inbox-preview
+  // chrome; repeating it as the first line of the plain-text part would read
+  // as a duplicated sentence to anyone whose client shows text.
   const text = htmlToText_(merged);
   const bytes = htmlByteLength_(html);
-  return { html: html, text: text, bytes: bytes };
+  return { html: html, text: text, bytes: bytes, preheader: preheader };
 }
 
 /**
@@ -30,7 +42,7 @@ function render_(bodySource, recipient, extras) {
  * defaults is what causes white-text-on-white / black-on-black under Gmail
  * iOS's forced dark-mode inversion.
  */
-function wrapHtml_(fragment) {
+function wrapHtml_(fragment, preheader) {
   return (
     '<!doctype html>' +
     '<html><head><meta charset="utf-8">' +
@@ -38,6 +50,7 @@ function wrapHtml_(fragment) {
     '<meta name="color-scheme" content="light dark">' +
     '</head>' +
     '<body style="margin:0;padding:0;background-color:#ffffff;">' +
+    preheaderBlock_(preheader) +
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" ' +
     'style="background-color:#ffffff;">' +
     '<tr><td style="padding:16px;color:#1a1a1a;font-family:Arial,Helvetica,sans-serif;' +
@@ -45,6 +58,28 @@ function wrapHtml_(fragment) {
     fragment +
     '</td></tr></table></body></html>'
   );
+}
+
+/**
+ * The preview line an inbox shows next to the subject. Hidden in the rendered
+ * message by every mainstream client, so it must be the first thing in <body>.
+ *
+ * The trailing run of zero-width non-joiners is not decoration: without it the
+ * client pads the preview by pulling in the opening words of the actual body,
+ * so the recipient sees "Preheader text Hi Sam, I noticed that…". The
+ * invisible characters absorb that padding. `mso-hide:all` covers Outlook,
+ * which ignores `display:none` in this position.
+ *
+ * Escaped, never raw — this is the one place a stray tag would leak visible
+ * markup into the inbox preview of a message sent under an exec's name.
+ */
+function preheaderBlock_(preheader) {
+  if (!preheader) return '';
+  const padding = new Array(60).join('&zwnj;&nbsp;');
+  return '<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;'
+    + 'font-size:1px;line-height:1px;color:#ffffff;opacity:0;">'
+    + escapeHtml_(preheader) + padding
+    + '</div>';
 }
 
 /**

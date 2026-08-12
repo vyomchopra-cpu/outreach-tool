@@ -68,6 +68,19 @@ const AGENT_VERSION = '0.2.0';
 const TRANSPORT_MODE = 'auto';
 
 /**
+ * How often each agent polls for due work. Apps Script only accepts
+ * 1, 5, 10, 15 or 30.
+ *
+ * This is the resolution limit on send timing: a campaign asking for 5-minute
+ * spacing cannot be honoured by a 5-minute poll, since a job due at 10:05 is
+ * picked up somewhere in 10:05–10:10 and the real gap lands anywhere between
+ * 5 and 10 minutes. 1 keeps timing accurate to about a minute, and at pilot
+ * volume the cost is trivial — a tick with nothing due is one Sheet read.
+ * Raise it if execution quota ever becomes the binding constraint.
+ */
+const AGENT_POLL_MINUTES = 1;
+
+/**
  * Multi-touch sequences require reply detection, which requires the Gmail API
  * (docs/GCP_CONSTRAINT.md). With it unavailable, a follow-up could fire at
  * someone who already replied "please stop" — the exact incident the whole

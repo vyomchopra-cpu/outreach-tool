@@ -4,7 +4,33 @@
  * per README hard rule #6 (guards live at the point of action, not just the UI).
  */
 
+/**
+ * Two token forms, and the difference matters:
+ *
+ *   {{token}}    escaped   — the value is treated as TEXT. `Smith & Sons` becomes
+ *                            `Smith &amp; Sons`; a stray `<` can't break the
+ *                            document or inject markup.
+ *   {{{token}}}  raw       — the value is treated as HTML and inserted verbatim.
+ *                            For CSV columns that deliberately carry markup
+ *                            (a formatted intro paragraph, a signature block).
+ *
+ * Escaping is the default because merge values come from an uploaded CSV, which
+ * is untrusted input: an unescaped `<` in a company name would otherwise
+ * silently corrupt every message, and anything worse would be injected straight
+ * into mail sent under an executive's name. Raw insertion has to be asked for
+ * explicitly, per token, and is visible in the campaign body when reviewing it.
+ */
+const MERGE_RAW_TOKEN_RE = /\{\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}\}/g;
 const MERGE_TOKEN_RE = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
+
+function escapeHtml_(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 /**
  * Builds the flat lookup a recipient row offers to the merge engine.
@@ -41,33 +67,56 @@ function previewExtrasForSenderPool_(senderPoolCsv) {
   return { unsubscribe: localPart + '+unsub@' + REPLY_TO_DOMAIN };
 }
 
-/** Returns every {{token}} referenced in a source string, deduped, in first-seen order. */
+/** Every token referenced in a source string, both forms, deduped, first-seen order. */
 function extractMergeTokens_(source) {
   const seen = {};
   const tokens = [];
-  let m;
-  MERGE_TOKEN_RE.lastIndex = 0;
-  while ((m = MERGE_TOKEN_RE.exec(source)) !== null) {
-    if (!seen[m[1]]) { seen[m[1]] = true; tokens.push(m[1]); }
-  }
+  [MERGE_RAW_TOKEN_RE, MERGE_TOKEN_RE].forEach(function (re) {
+    let m;
+    re.lastIndex = 0;
+    while ((m = re.exec(source)) !== null) {
+      if (!seen[m[1]]) { seen[m[1]] = true; tokens.push(m[1]); }
+    }
+  });
   return tokens;
 }
 
 /**
- * Substitutes every {{token}} in source using data. Throws on the first token
- * with no matching key, or a matching key that is empty/blank — a blank
- * "Hi ," is exactly as broken as an unresolved token and must fail the same way.
+ * Substitutes every token in source using data. Throws on the first token with
+ * no matching key, or a matching key that is empty/blank — a blank "Hi ," is
+ * exactly as broken as an unresolved token and must fail the same way.
+ *
+ * options.escape defaults to true (HTML context). Pass { escape: false } for
+ * plain-text contexts such as the subject line, where `&amp;` would be shown
+ * to the recipient literally rather than rendered.
+ *
+ * Raw {{{tokens}}} are substituted first, so their inserted markup can never be
+ * re-scanned and partially matched by the escaped pass.
  */
-function applyMerge_(source, data) {
+function applyMerge_(source, data, options) {
+  const escape = !(options && options.escape === false);
   const missing = [];
-  const result = source.replace(MERGE_TOKEN_RE, function (whole, token) {
+
+  function resolve(token) {
     const value = data[token];
     if (value === undefined || value === null || String(value).trim() === '') {
       missing.push(token);
-      return whole;
+      return null;
     }
     return String(value);
+  }
+
+  let result = source.replace(MERGE_RAW_TOKEN_RE, function (whole, token) {
+    const value = resolve(token);
+    return value === null ? whole : value; // raw: inserted verbatim, by request
   });
+
+  result = result.replace(MERGE_TOKEN_RE, function (whole, token) {
+    const value = resolve(token);
+    if (value === null) return whole;
+    return escape ? escapeHtml_(value) : value;
+  });
+
   if (missing.length > 0) {
     throw new Error('Missing merge value(s): ' + missing.join(', '));
   }
@@ -75,9 +124,9 @@ function applyMerge_(source, data) {
 }
 
 /** Preflight-time check: does every token in the source resolve for this recipient? */
-function mergeWillSucceed_(source, recipient) {
+function mergeWillSucceed_(source, recipient, extras) {
   try {
-    applyMerge_(source, mergeDataForRecipient_(recipient));
+    applyMerge_(source, mergeDataForRecipient_(recipient, extras));
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e.message };

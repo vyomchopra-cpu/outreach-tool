@@ -137,6 +137,28 @@ function backoffMinutes_(attempts) {
   return Math.min(240, Math.pow(2, attempts) * 2);
 }
 
+/**
+ * Fixed spacing, for a campaign with an explicit interval. Returns minutes
+ * from the campaign's anchor rather than from the window start, so "two mails
+ * five minutes apart" launched at 10:20 sends at 10:20 and 10:25 — not at
+ * 09:00 and 09:05, both already in the past, which would fire both at once and
+ * defeat the entire point of asking for an interval.
+ */
+function fixedIntervalMinutes_(slotIndex, intervalMinutes, anchorMinutes) {
+  return (anchorMinutes || 0) + slotIndex * intervalMinutes;
+}
+
+/** How many sends an interval physically allows inside one window — the cap can't exceed this. */
+function slotsPerWindow_(intervalMinutes, windowMinutes) {
+  return Math.max(1, Math.floor(windowMinutes / intervalMinutes) + 1);
+}
+
+/** Minutes past midnight, local to timeZone. */
+function localMinutes_(now, timeZone, formatInZone) {
+  const s = formatInZone(now, timeZone); // "yyyy-MM-ddTHH:mm:ss"
+  return parseInt(s.slice(11, 13), 10) * 60 + parseInt(s.slice(14, 16), 10);
+}
+
 /** Local wall-clock hour in timeZone for `now` — used for the agent's own independent window check. */
 function localHour_(now, timeZone, formatInZone) {
   const s = formatInZone(now, timeZone); // "yyyy-MM-ddTHH:mm:ss"

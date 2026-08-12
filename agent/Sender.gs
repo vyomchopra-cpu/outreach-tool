@@ -52,8 +52,12 @@ function processJob_(email, secret, job) {
     // {{unsubscribe}} resolves here, not at queue time, because it's the
     // sending exec's own plus-alias rather than anything about the recipient.
     const extras = { unsubscribe: unsubscribeAddress_() };
-    const rendered = render_(job.campaign.body_source, job.recipient, extras);
-    const subject = applyMerge_(job.campaign.subject, mergeDataForRecipient_(job.recipient, extras));
+    const rendered = render_(job.campaign.body_source, job.recipient, extras,
+      { preheader: job.campaign.preheader });
+    // escape:false — the subject is plain text, and an escaped one would show
+    // the recipient a literal "&amp;" in their inbox list.
+    const subject = applyMerge_(job.campaign.subject, mergeDataForRecipient_(job.recipient, extras),
+      { escape: false });
 
     // sendMessage_ picks the transport (agent/Transport.gs). Under the
     // MailApp fallback rfcMessageId is '' — reply matching is impossible for

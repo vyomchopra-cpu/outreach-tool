@@ -118,6 +118,19 @@ check('every render_/applyMerge_ call site supplies send-time extras', () => {
   if (offenders.length) throw new Error(offenders.join('; '));
 });
 
+check('the live send path renders the preheader and leaves the subject unescaped', () => {
+  // Both were missing on first write: the preheader silently never rendered in
+  // real mail, and every subject containing & or a quote would have shown the
+  // recipient an HTML entity. Neither is visible in preview, which uses its own
+  // call site — so only a check across both sites catches it.
+  const src = readFileSync('agent/Sender.gs', 'utf8');
+  if (!/preheader:\s*job\.campaign\.preheader/.test(src))
+    throw new Error('processJob_ does not pass the campaign preheader — it would never appear in real sends');
+  const subjectLine = src.match(/const subject = applyMerge_[\s\S]{0,200}/);
+  if (!subjectLine || !/escape:\s*false/.test(subjectLine[0]))
+    throw new Error('subject is HTML-escaped at send time — recipients would see &amp; literally');
+});
+
 check('seed queue rows are resolved everywhere they are read (they have no Recipients row)', () => {
   const src = readFileSync('gateway/AgentApi.gs', 'utf8');
   if (!/isSeedRecipientId_/.test(src)) throw new Error('no seed-row awareness — pollDueJobs would look a seed id up in Recipients, get null, and silently drop the send');
@@ -287,6 +300,47 @@ check('renderer succeeds and derives correct text when every token resolves', ()
     throw new Error('unexpected plain-text derivation: ' + JSON.stringify(out.text));
 });
 
+check('merge values are HTML-escaped by default — CSV input cannot inject markup', () => {
+  const ctx = loadSharedRenderer_();
+  const recipient = {
+    first_name: 'Sam', title: 'VP', custom: {},
+    company: '<script>alert(1)</script> & "quoted"',
+  };
+  const out = ctx.render_('<p>Hi {{firstName}}, at {{company}}.</p>', recipient, { unsubscribe: 'x@y.com' });
+  if (out.html.includes('<script>')) throw new Error('SCRIPT TAG SURVIVED ESCAPING — CSV input can inject markup into mail sent as an exec');
+  if (!out.html.includes('&lt;script&gt;')) throw new Error('script tag was not escaped to entities');
+  if (!out.html.includes('&amp;')) throw new Error('ampersand was not escaped');
+  // htmlToText_ decodes entities, so the reader of the plain-text part sees the literal original.
+  if (!out.text.includes('<script>alert(1)</script>')) throw new Error('plain-text part should show the original characters, decoded');
+});
+
+check('{{{token}}} inserts raw HTML — the explicit, opt-in escape hatch', () => {
+  const ctx = loadSharedRenderer_();
+  const recipient = { first_name: 'Sam', custom: { intro_html: '<strong>scaling</strong>' } };
+  const out = ctx.render_('<p>{{firstName}} is {{{intro_html}}}.</p>', recipient, { unsubscribe: 'x@y.com' });
+  if (!out.html.includes('<strong>scaling</strong>')) throw new Error('raw token was escaped — {{{ }}} must insert markup verbatim');
+});
+
+check('subject merging does not HTML-escape (escape:false)', () => {
+  const ctx = loadSharedRenderer_();
+  const data = ctx.mergeDataForRecipient_({ company: 'Smith & Jones', custom: {} }, {});
+  const subject = ctx.applyMerge_('A note for {{company}}', data, { escape: false });
+  if (subject !== 'A note for Smith & Jones')
+    throw new Error('subject should stay literal, got: ' + subject);
+});
+
+check('preheader is hidden, escaped, and padded against body bleed-through', () => {
+  const ctx = loadSharedRenderer_();
+  const recipient = { first_name: 'Sam', custom: {} };
+  const out = ctx.render_('<p>Hi {{firstName}}.</p>', recipient, { unsubscribe: 'x@y.com' },
+    { preheader: 'A note about <Acme>' });
+  if (!/display:none/.test(out.html)) throw new Error('preheader block is not hidden');
+  if (!/mso-hide:all/.test(out.html)) throw new Error('preheader lacks the Outlook hide rule');
+  if (out.html.includes('<Acme>')) throw new Error('preheader was not escaped');
+  if (!/&zwnj;/.test(out.html)) throw new Error('no padding — the client will pull body text into the preview');
+  if (out.text.includes('A note about')) throw new Error('preheader leaked into the plain-text part');
+});
+
 check('{{unsubscribe}} resolves from send-time extras, not from the recipient row', () => {
   const ctx = loadSharedRenderer_();
   const recipient = { first_name: 'Priya', title: 'VP Eng', company: 'Acme Corp', custom: {} };
@@ -403,6 +457,40 @@ check('isWithinSendWindow_ correctly bounds the 09:00-17:00 window', () => {
   if (!ctx.isWithinSendWindow_(istToUtc(9, 0), 'Asia/Kolkata', window, ctx.formatInZoneViaUtilities_)) throw new Error('09:00 IST should be inside window');
   if (!ctx.isWithinSendWindow_(istToUtc(16, 59), 'Asia/Kolkata', window, ctx.formatInZoneViaUtilities_)) throw new Error('16:59 IST should be inside window');
   if (ctx.isWithinSendWindow_(istToUtc(17, 0), 'Asia/Kolkata', window, ctx.formatInZoneViaUtilities_)) throw new Error('17:00 IST should be outside window (end exclusive)');
+});
+
+check('fixed interval anchors on launch time, so a mid-window launch starts now', () => {
+  const ctx = loadSharedSchedule_();
+  // Two sends, 5 minutes apart, launched 80 minutes into the window.
+  if (ctx.fixedIntervalMinutes_(0, 5, 80) !== 80) throw new Error('first send should be at the anchor, not the window start');
+  if (ctx.fixedIntervalMinutes_(1, 5, 80) !== 85) throw new Error('second send should be exactly one interval later');
+  // Later days start at the top of the window.
+  if (ctx.fixedIntervalMinutes_(0, 5, 0) !== 0) throw new Error('with no anchor the first send is at the window start');
+});
+
+check('slotsPerWindow_ caps how many sends an interval physically allows in a day', () => {
+  const ctx = loadSharedSchedule_();
+  const windowMinutes = 8 * 60;
+  if (ctx.slotsPerWindow_(60, windowMinutes) !== 9) throw new Error('hourly spacing should fit 9 sends in 8 hours');
+  if (ctx.slotsPerWindow_(5, windowMinutes) !== 97) throw new Error('5-minute spacing should fit 97 sends in 8 hours');
+  if (ctx.slotsPerWindow_(1000, windowMinutes) !== 1) throw new Error('an interval longer than the window must still allow one send, not zero');
+});
+
+check('agent poll interval is one Apps Script actually accepts', () => {
+  const src = readFileSync('shared/Config.gs', 'utf8');
+  const m = src.match(/AGENT_POLL_MINUTES\s*=\s*(\d+)/);
+  if (!m) throw new Error('AGENT_POLL_MINUTES not found');
+  if ([1, 5, 10, 15, 30].indexOf(Number(m[1])) === -1)
+    throw new Error('everyMinutes() only accepts 1, 5, 10, 15, 30 — got ' + m[1]);
+});
+
+check('the trigger is rebuilt when the poll interval changes', () => {
+  const src = readFileSync('agent/Onboard.gs', 'utf8');
+  const fn = src.match(/function ensureAgentTrigger_[\s\S]*?\n\}/);
+  if (!fn) throw new Error('ensureAgentTrigger_ not found');
+  if (!/TRIGGER_MINUTES/.test(fn[0]))
+    throw new Error('interval is not recorded — changing AGENT_POLL_MINUTES would silently no-op on onboarded agents');
+  if (!/deleteTrigger/.test(fn[0])) throw new Error('stale trigger is never removed');
 });
 
 check('remainingCapToday_ never goes negative and stops at the cap', () => {
