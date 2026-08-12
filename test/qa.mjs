@@ -53,9 +53,43 @@ function loadSharedRenderer_() {
   return ctx;
 }
 
-check('agent/ never references GmailApp or MailApp', () => {
+check('agent/ never references GmailApp or the full mail.google.com scope', () => {
+  // The rule is, and always was, about SCOPE, not about which class is used:
+  // never acquire the ability to read the exec's mail. GmailApp silently pulls
+  // https://mail.google.com/ (read, compose, send, permanently delete), which
+  // is why it is banned outright.
+  //
+  // MailApp is deliberately NOT banned — it uses script.send_mail, which is
+  // strictly send-only and cannot read, list, or search a single message. It
+  // is the fallback transport (agent/Transport.gs) precisely because it needs
+  // no Google Cloud project, and it satisfies the promise to the exec at least
+  // as strongly as gmail.send does. See README hard rule 1.
   const src = stripComments_(allSource('agent'));
-  if (/\bGmailApp\b|\bMailApp\b/.test(src)) throw new Error('forbidden API referenced');
+  if (/\bGmailApp\b/.test(src)) throw new Error('GmailApp referenced — pulls the full mail.google.com scope');
+  if (/mail\.google\.com/.test(src)) throw new Error('the full mail.google.com scope appears in agent/');
+});
+
+check('MailApp use is backed by the send-only script.send_mail scope in the manifest', () => {
+  const src = stripComments_(allSource('agent'));
+  if (!/\bMailApp\b/.test(src)) return; // not used, nothing to back
+  const scopes = JSON.parse(readFileSync('agent/appsscript.json', 'utf8')).oauthScopes;
+  if (!scopes.includes('https://www.googleapis.com/auth/script.send_mail'))
+    throw new Error('agent/ calls MailApp but script.send_mail is not declared — the consent screen would not match the code');
+});
+
+check('both transports exist and neither can read mail', () => {
+  const src = readFileSync('agent/Transport.gs', 'utf8');
+  if (!/function sendViaMailApp_/.test(src)) throw new Error('no MailApp fallback transport — a GCP outage/permission gap would block all sending');
+  if (!/sendMail_\(/.test(src)) throw new Error('no Gmail REST transport');
+  // Whichever path runs, the plain-text alternative is mandatory (hard rule 5).
+  if (!/Refusing to send/.test(src)) throw new Error('MailApp path does not enforce a plain-text alternative part');
+});
+
+check('unsubscribe is a blocking preflight check, not a warning', () => {
+  const src = readFileSync('admin/Preflight.gs', 'utf8');
+  if (!/\{\{unsubscribe\}\}/.test(src)) throw new Error('preflight does not require an unsubscribe token in the body');
+  const m = src.match(/unsubscribe_present[\s\S]{0,200}/);
+  if (m && /blocking:\s*false/.test(m[0])) throw new Error('unsubscribe check is marked non-blocking');
 });
 
 check('agent/appsscript.json scopes are exactly the Tier B set, no more', () => {
@@ -199,6 +233,32 @@ check('renderer succeeds and derives correct text when every token resolves', ()
   if (!out.html.includes('Priya') || !out.html.includes('VP Eng')) throw new Error('merge did not apply to html');
   if (out.text !== "Hi Priya, saw you're VP Eng at Acme Corp." )
     throw new Error('unexpected plain-text derivation: ' + JSON.stringify(out.text));
+});
+
+check('{{unsubscribe}} resolves from send-time extras, not from the recipient row', () => {
+  const ctx = loadSharedRenderer_();
+  const recipient = { first_name: 'Priya', title: 'VP Eng', company: 'Acme Corp', custom: {} };
+  const source = '<p>Hi {{firstName}}.</p><p>Opt out: {{unsubscribe}}</p>';
+
+  // Without extras it must hard-fail rather than render a blank opt-out line —
+  // a footer reading "Opt out:" with nothing after it is a compliance failure.
+  let threw = false;
+  try { ctx.render_(source, recipient); } catch (e) { threw = /unsubscribe/.test(e.message); }
+  if (!threw) throw new Error('missing {{unsubscribe}} did not hard-fail');
+
+  const out = ctx.render_(source, recipient, { unsubscribe: 'jane+unsub@moveinsync.com' });
+  if (!out.html.includes('jane+unsub@moveinsync.com')) throw new Error('extras did not reach the rendered html');
+  if (!out.text.includes('jane+unsub@moveinsync.com')) throw new Error('extras did not reach the plain-text part');
+});
+
+check('extras cannot silently overwrite a recipient field with a stale value', () => {
+  const ctx = loadSharedRenderer_();
+  const recipient = { first_name: 'Priya', title: 'VP Eng', company: 'Acme Corp', custom: {} };
+  // Documented precedence: extras win. This test pins that behaviour so a
+  // future change to the merge order is a deliberate, visible decision.
+  const data = ctx.mergeDataForRecipient_(recipient, { company: 'Override Inc' });
+  if (data.company !== 'Override Inc') throw new Error('extras should take precedence over recipient fields');
+  if (data.firstName !== 'Priya') throw new Error('extras clobbered an unrelated field');
 });
 
 check('rendered HTML under MAX_HTML_BYTES on a representative body', () => {

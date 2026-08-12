@@ -51,4 +51,23 @@ const ADMIN_ALLOWLIST = [
 // EXISTING deployment (README hard rule 7), which keeps this constant stable.
 const CENTRAL_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbyLM5Wyr9S_isiYbk1MPMKT3XMzjgg9r6pXBXKIQhbz7xlnScOVZwnaK14jX9DZTunA/exec';
 
-const AGENT_VERSION = '0.1.0';
+const AGENT_VERSION = '0.2.0';
+
+/**
+ * Which send path the agent uses — see agent/Transport.gs.
+ *   'auto'     probe the Gmail API once per run, prefer it, fall back to MailApp
+ *   'advanced' force the Gmail REST path (fails if the API isn't enabled)
+ *   'mailapp'  force the built-in MailApp path (needs no Google Cloud access)
+ * Leave on 'auto' unless deliberately testing one path.
+ */
+const TRANSPORT_MODE = 'auto';
+
+/**
+ * Multi-touch sequences require reply detection, which requires the Gmail API
+ * (docs/GCP_CONSTRAINT.md). With it unavailable, a follow-up could fire at
+ * someone who already replied "please stop" — the exact incident the whole
+ * Tier B argument was built to prevent. Until reply detection is confirmed
+ * working, campaigns are single-touch and this stays false. Enforced in
+ * admin/Preflight.gs, not merely documented here.
+ */
+const ALLOW_MULTI_TOUCH = false;

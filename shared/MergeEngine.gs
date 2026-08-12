@@ -6,8 +6,13 @@
 
 const MERGE_TOKEN_RE = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
 
-/** Builds the flat lookup a recipient row offers to the merge engine. */
-function mergeDataForRecipient_(recipient) {
+/**
+ * Builds the flat lookup a recipient row offers to the merge engine.
+ * `extras` carries values that come from the sending context rather than the
+ * recipient — currently {{unsubscribe}}, which is the sender's own plus-alias
+ * and therefore unknowable until we know which exec is sending.
+ */
+function mergeDataForRecipient_(recipient, extras) {
   const data = {
     firstName: recipient.first_name || '',
     lastName: recipient.last_name || '',
@@ -16,6 +21,7 @@ function mergeDataForRecipient_(recipient) {
   };
   const custom = recipient.custom || {};
   Object.keys(custom).forEach(function (k) { data[k] = custom[k]; });
+  Object.keys(extras || {}).forEach(function (k) { data[k] = extras[k]; });
   return data;
 }
 

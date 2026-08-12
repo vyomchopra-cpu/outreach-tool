@@ -40,13 +40,30 @@ function runPreflight_(campaign) {
   }
 
   const sample = { first_name: 'Sam', last_name: 'Prospect', company: 'Example Corp', title: 'VP Engineering', custom: {} };
+  // {{unsubscribe}} is supplied by the sending agent, not the recipient row —
+  // preflight stands in a placeholder so the token resolves here the same way
+  // it will at send time.
+  const sampleExtras = { unsubscribe: 'sender+unsub@' + REPLY_TO_DOMAIN };
   let rendered = null;
   try {
-    rendered = render_(campaign.body_source, sample);
-    applyMerge_(campaign.subject, mergeDataForRecipient_(sample));
+    rendered = render_(campaign.body_source, sample, sampleExtras);
+    applyMerge_(campaign.subject, mergeDataForRecipient_(sample, sampleExtras));
     pass('merge_tokens_resolve');
   } catch (e) {
     fail('merge_tokens_resolve', e.message);
+  }
+
+  /**
+   * A working unsubscribe path is a legal requirement (CAN-SPAM and friends),
+   * and it matters more, not less, while automatic unsubscribe handling is
+   * degraded: if the Gmail API is unavailable the agent cannot detect an
+   * unsubscribe request itself, so the address in the footer is the only route
+   * a recipient has. Blocking, never a warning.
+   */
+  if ((campaign.body_source || '').indexOf('{{unsubscribe}}') === -1) {
+    fail('unsubscribe_present', 'Body must contain {{unsubscribe}} — it renders as the sending exec\'s opt-out address');
+  } else {
+    pass('unsubscribe_present');
   }
 
   if (rendered) {

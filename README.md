@@ -26,11 +26,17 @@ If that promise ever weakens, the product is dead. Hence the hard rules below.
 These are the equivalent of the Gmail Rewriter's "never redeploy as Anyone" rule.
 Breaking any of them is a release blocker, and `test/qa.mjs` fails the build.
 
-1. **Never use `GmailApp` or `MailApp`.** `GmailApp` silently pulls the full
-   `https://mail.google.com/` scope — read, compose, send *and permanently delete
-   all your email* — which destroys the entire trust proposition on the consent
-   screen. All sending goes through the Gmail REST API via `UrlFetchApp` +
-   `ScriptApp.getOAuthToken()`, with scopes pinned in `appsscript.json`.
+1. **Never acquire a scope that can read mail.** `GmailApp` is banned outright —
+   it silently pulls the full `https://mail.google.com/` scope (read, compose,
+   send *and permanently delete all your email*), which destroys the entire
+   trust proposition on the consent screen.
+   **`MailApp` is explicitly allowed** and is the fallback send transport: its
+   scope is `script.send_mail`, strictly send-only, unable to read, list, or
+   search a single message. The rule is about scope, not about class names —
+   see `docs/GCP_CONSTRAINT.md` for why the fallback exists (this Workspace's
+   regular users cannot enable the Gmail API on their own scripts' Cloud
+   projects, so a path with no Google Cloud dependency is mandatory, not
+   optional).
 2. **Never add `gmail.modify`, `gmail.readonly`, or `https://mail.google.com/`.**
    No feature is worth it. If a feature seems to need it, the feature is wrong.
 3. **No exec OAuth token is ever transmitted to, or stored by, the central system.**
@@ -83,7 +89,8 @@ docs/      Architecture, schema, governance, deploy, exec consent
 
 | Decision | Choice |
 |---|---|
-| Scope tier | **B** — `gmail.send` + `settings.basic` + `metadata` |
+| Scope tier | **B** where the Gmail API is reachable; degrades to send-only + manual filters otherwise — see `docs/GCP_CONSTRAINT.md` |
+| Campaign shape | **Single-touch** (`ALLOW_MULTI_TOUCH = false`) while reply detection is unavailable |
 | Sending domain | **Primary corporate domain**, strict governance + auto-halt |
 | Send window | 09:00–17:00, business days, sender- or recipient-local — chosen per campaign |
 | Daily cap per mailbox | 10 → 15 → 20 ramp |

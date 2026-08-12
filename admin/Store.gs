@@ -7,7 +7,8 @@ const SHEET_ID = '1pw_BtBwaHOvAWIq66HvB81OfkMP_9rVRWK7Y3OiSjRc';
 
 const SCHEMA = {
   Senders: ['email', 'display_name', 'status', 'ramp_start_date', 'daily_cap_override',
-    'timezone', 'agent_version', 'last_heartbeat', 'secret_hash', 'consent_recorded_at'],
+    'timezone', 'agent_version', 'last_heartbeat', 'secret_hash', 'consent_recorded_at',
+    'capabilities'],
   Campaigns: ['id', 'name', 'status', 'subject', 'body_source', 'sender_pool', 'tz_mode',
     'send_window', 'created_by', 'created_at', 'exec_approved_by', 'exec_approved_at',
     'seed_passed_at', 'canary_released_at', 'projected_completion'],
@@ -67,6 +68,7 @@ function setKillSwitch_(on, actor) {
 const JSON_COLUMNS = {
   Recipients: ['custom'],
   Events: ['detail'],
+  Senders: ['capabilities'],
 };
 
 function sheet_(tabName) {

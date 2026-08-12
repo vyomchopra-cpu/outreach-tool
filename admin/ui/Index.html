@@ -126,6 +126,29 @@
   </div>
 </div>
 
+<div class="grid" style="margin-top:24px">
+  <div class="panel">
+    <strong>Sender fleet</strong>
+    <div class="sub">"Signals: no" means that agent cannot detect replies, bounces, or unsubscribes — keep those campaigns single-touch and record opt-outs manually below.</div>
+    <button id="btnRefreshSenders" class="secondary">Refresh</button>
+    <div id="senderList"></div>
+  </div>
+
+  <div class="panel">
+    <strong>Manual suppression</strong>
+    <div class="sub">Permanent and global, exactly like an automatic unsubscribe. Use this whenever an exec forwards an opt-out request. One address per line.</div>
+    <textarea id="suppressText" style="min-height:90px" placeholder="someone@prospect.com&#10;another@prospect.com"></textarea>
+    <button id="btnSuppress">Suppress these permanently</button>
+    <div id="suppressStatus" class="sub"></div>
+
+    <label style="margin-top:16px">Mark as replied</label>
+    <div class="sub">Keeps reply-rate reporting honest while automatic detection is unavailable.</div>
+    <input type="text" id="repliedEmail" placeholder="someone@prospect.com">
+    <button id="btnMarkReplied" class="secondary">Mark replied</button>
+    <div id="repliedStatus" class="sub"></div>
+  </div>
+</div>
+
 <div class="campaign-list">
   <strong>Campaigns</strong>
   <div id="campaignList"></div>
@@ -330,6 +353,47 @@
     }).recordComplaintRate($('complaintSender').value, $('complaintDate').value, parseFloat($('complaintPct').value));
   };
 
+  function refreshSenders_() {
+    google.script.run.withSuccessHandler(function (senders) {
+      $('senderList').innerHTML = senders.length ? senders.map(function (s) {
+        const beat = s.stale ? '<span style="color:#c0392b">stale</span>' : 'live';
+        const sig = s.signalsWorking
+          ? '<span style="color:#1a7f37">signals: yes</span>'
+          : '<span style="color:#a67c00">signals: no</span>';
+        return '<div class="campaign-row"><span>' + s.displayName + ' &lt;' + s.email + '&gt;'
+          + '<div class="sub" style="margin:0">' + s.transport + ' · ' + sig + ' · ' + beat
+          + ' · quota ' + s.providerQuota + '</div></span>'
+          + '<span class="status-pill">' + s.status + '</span></div>';
+      }).join('') : '<div class="sub">No senders onboarded yet.</div>';
+    }).withFailureHandler(function (err) {
+      $('senderList').innerHTML = '<div class="error">' + err.message + '</div>';
+    }).senderStatus();
+  }
+
+  $('btnRefreshSenders').onclick = refreshSenders_;
+
+  $('btnSuppress').onclick = function () {
+    if (!confirm('Suppression is permanent and global. These addresses will never receive mail from any campaign or sender again. Continue?')) return;
+    $('suppressStatus').textContent = 'Suppressing…';
+    google.script.run.withSuccessHandler(function (r) {
+      $('suppressStatus').textContent = 'Suppressed ' + r.suppressed
+        + (r.invalid.length ? ' · could not parse: ' + r.invalid.join(', ') : '');
+      $('suppressText').value = '';
+    }).withFailureHandler(function (err) {
+      $('suppressStatus').textContent = 'Error: ' + err.message;
+    }).manuallySuppressBulk($('suppressText').value, 'unsubscribe request relayed by sender');
+  };
+
+  $('btnMarkReplied').onclick = function () {
+    google.script.run.withSuccessHandler(function (r) {
+      $('repliedStatus').textContent = 'Updated ' + r.updated + ' recipient row(s).';
+      $('repliedEmail').value = '';
+    }).withFailureHandler(function (err) {
+      $('repliedStatus').textContent = 'Error: ' + err.message;
+    }).manuallyMarkReplied(currentCampaignId, $('repliedEmail').value);
+  };
+
   refreshKillSwitch_();
+  refreshSenders_();
   refreshCampaignList();
 </script>

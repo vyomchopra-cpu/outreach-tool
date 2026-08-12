@@ -16,8 +16,8 @@
  * Throws (via applyMerge_) if any {{token}} in bodySource has no value on
  * this recipient — callers must treat that as a hard send-block, not a warning.
  */
-function render_(bodySource, recipient) {
-  const merged = applyMerge_(bodySource, mergeDataForRecipient_(recipient));
+function render_(bodySource, recipient, extras) {
+  const merged = applyMerge_(bodySource, mergeDataForRecipient_(recipient, extras));
   const html = wrapHtml_(merged);
   const text = htmlToText_(merged);
   const bytes = htmlByteLength_(html);

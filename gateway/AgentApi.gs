@@ -69,9 +69,20 @@ function registerSender(email, secretPlain, displayName, timezone) {
   logEvent_(email, 'onboard', { senderEmail: email, detail: { action: 'register' } });
 }
 
-function heartbeat(email, secret, agentVersion) {
+/**
+ * capabilities is what the agent reports it can actually do right now
+ * (agent/Diagnostics.gs currentCapabilities_) — notably whether the Gmail API
+ * is reachable, which determines whether reply/bounce detection works at all.
+ * Stored so an admin can see a degraded sender in the Sheet rather than
+ * inferring it from missing Signals rows.
+ */
+function heartbeat(email, secret, agentVersion, capabilities) {
   const sender = requireSender_(email, secret);
-  updateRow_('Senders', email, { last_heartbeat: new Date(), agent_version: agentVersion });
+  updateRow_('Senders', email, {
+    last_heartbeat: new Date(),
+    agent_version: agentVersion,
+    capabilities: capabilities || null,
+  });
   return { killSwitch: isKillSwitchOn_(), status: sender.status };
 }
 
