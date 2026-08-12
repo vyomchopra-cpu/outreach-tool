@@ -85,6 +85,18 @@ check('both transports exist and neither can read mail', () => {
   if (!/Refusing to send/.test(src)) throw new Error('MailApp path does not enforce a plain-text alternative part');
 });
 
+check('callCentral_ retries transport failures but never a structured rejection', () => {
+  const src = readFileSync('agent/CentralClient.gs', 'utf8');
+  if (!/attempt\s*<\s*3|attempt\s*<=\s*3/.test(src))
+    throw new Error('no retry loop — the 302 -> googleusercontent hop intermittently 404s');
+  // A structured ok:false must return immediately; retrying a business
+  // rejection would turn one "Unknown sender" into three.
+  const raw = src.match(/function callCentralRaw_[\s\S]*?\n\}/);
+  if (!raw) throw new Error('callCentralRaw_ not found');
+  if (/!body\.ok[\s\S]{0,80}(continue|retry)/.test(raw[0]))
+    throw new Error('callCentralRaw_ appears to retry structured rejections');
+});
+
 check('unsubscribe is a blocking preflight check, not a warning', () => {
   const src = readFileSync('admin/Preflight.gs', 'utf8');
   if (!/\{\{unsubscribe\}\}/.test(src)) throw new Error('preflight does not require an unsubscribe token in the body');

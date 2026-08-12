@@ -49,15 +49,28 @@ function runDiagnostics_() {
   }));
 
   // --- Central connectivity ---
-  probes.push(probe_('Gateway reachable', 'POST to CENTRAL_WEBAPP_URL', function () {
+  // Deliberately split into two probes. A structured {ok:false} reply proves
+  // the whole round trip works and only the *answer* was negative — reporting
+  // that as "gateway unreachable" sent debugging down the wrong path once
+  // already. Transport health and registration state are separate facts.
+  let envelope = null;
+  probes.push(probe_('Gateway reachable', 'Round trip to CENTRAL_WEBAPP_URL', function () {
     if (!CENTRAL_WEBAPP_URL) throw new Error('CENTRAL_WEBAPP_URL is empty (shared/Config.gs)');
-    const hb = callCentral_('heartbeat', [getMyEmail_(), getOrCreateSecret_(), AGENT_VERSION]);
-    return 'status=' + hb.status + ', killSwitch=' + hb.killSwitch;
+    envelope = callCentralRaw_('heartbeat', [getMyEmail_(), getOrCreateSecret_(), AGENT_VERSION, currentCapabilities_()]);
+    return 'yes — gateway answered with valid JSON';
   }));
 
   probes.push(probe_('Registered centrally', 'Is there a Senders row for this account', function () {
-    const jobs = callCentral_('pollDueJobs', [getMyEmail_(), getOrCreateSecret_()]);
-    return jobs.length + ' job(s) currently due';
+    if (!envelope) throw new Error('skipped — the gateway did not answer at all (see the probe above)');
+    if (envelope.ok) return 'yes — status=' + envelope.result.status + ', killSwitch=' + envelope.result.killSwitch;
+    if (/Unknown sender/i.test(envelope.error || '')) {
+      throw new Error('NOT REGISTERED — run ?onboard=1 to create the Senders row. (The gateway itself is fine.)');
+    }
+    if (/Bad secret/i.test(envelope.error || '')) {
+      throw new Error('SECRET MISMATCH — a Senders row exists but was created by a different agent install. '
+        + 'An admin must delete that row so this agent can re-key, then run ?onboard=1.');
+    }
+    throw new Error(envelope.error);
   }));
 
   // --- Local agent state ---

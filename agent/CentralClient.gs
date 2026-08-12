@@ -36,23 +36,46 @@ function getOrCreateSecret_() {
   return secret;
 }
 
-function callCentral_(action, args) {
+/**
+ * Posts to the gateway and returns the raw {ok, result, error} envelope
+ * without throwing. Callers that care about the distinction between "the pipe
+ * is broken" and "the pipe works and the answer was no" use this directly.
+ *
+ * Retries transport-level failures only. A POST to an Apps Script web app is
+ * answered with a 302 to a one-shot googleusercontent.com content URL, and
+ * that second hop intermittently 404s or returns an empty body — observed
+ * live, on a call made moments after an identical one succeeded. Retrying a
+ * business-level rejection (a structured ok:false) would be wrong and is
+ * never done: those return immediately.
+ */
+function callCentralRaw_(action, args) {
   if (!CENTRAL_WEBAPP_URL) throw new Error('CENTRAL_WEBAPP_URL is not configured (shared/Config.gs)');
-  const response = UrlFetchApp.fetch(CENTRAL_WEBAPP_URL, {
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify({ action: action, args: args }),
-    muteHttpExceptions: true,
-    followRedirects: true,
-  });
-  const code = response.getResponseCode();
-  const text = response.getContentText();
-  let body;
-  try {
-    body = JSON.parse(text);
-  } catch (e) {
-    throw new Error('Central returned non-JSON (HTTP ' + code + '), body="' + text.slice(0, 300) + '"');
+  const payload = JSON.stringify({ action: action, args: args });
+  let lastFailure = '';
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const response = UrlFetchApp.fetch(CENTRAL_WEBAPP_URL, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: payload,
+      muteHttpExceptions: true,
+      followRedirects: true,
+    });
+    const code = response.getResponseCode();
+    const text = response.getContentText();
+
+    try {
+      return JSON.parse(text); // structured answer, success or not — done either way
+    } catch (e) {
+      lastFailure = 'HTTP ' + code + ', body="' + text.slice(0, 200) + '"';
+      if (attempt < 3) Utilities.sleep(attempt * 1500);
+    }
   }
+  throw new Error('Central unreachable after 3 attempts (' + action + '): ' + lastFailure);
+}
+
+function callCentral_(action, args) {
+  const body = callCentralRaw_(action, args);
   if (!body.ok) throw new Error('Central API error (' + action + '): ' + body.error);
   return body.result;
 }
