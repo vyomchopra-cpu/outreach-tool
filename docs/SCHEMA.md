@@ -24,6 +24,7 @@ Column order below is authoritative — `Store.gs` bootstraps headers from it an
 | `secret_hash` | string | SHA-256 of the onboarding shared secret. Never the secret itself. |
 | `consent_recorded_at` | datetime | See `docs/EXEC_CONSENT.md` |
 | `capabilities` | json | Reported by the agent every heartbeat: transport in use, whether the Gmail API (and so reply detection) is reachable, remaining provider quota. Makes a degraded agent visible instead of inferred from missing `Signals` rows. |
+| `sends_expire_at` | datetime? | Blank = permanent (default). Set/extended by an admin only (`admin/Access.gs` `setSenderExpiry`) — never self-declared at registration, since `gateway/` is `ANYONE_ANONYMOUS`. Checked live on every `pollDueJobs`/`heartbeat`, not cached. |
 
 ## `Campaigns`
 

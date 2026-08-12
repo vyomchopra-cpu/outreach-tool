@@ -61,6 +61,40 @@ function revokeAccess(email) {
   logEvent_(admin, 'admin_action', { detail: { action: 'revoke_access', email: clean } });
 }
 
+/**
+ * Time-boxed SENDING capability — distinct from console access above. A
+ * sender authorizes their own agent exactly once (a real Google OAuth
+ * consent screen — no way around that, and no reason to want one, since it's
+ * the whole reason this architecture never holds anyone's credentials). What
+ * this controls is how many days an admin allows that authorization to keep
+ * actually sending; gateway/AgentApi.gs's pollDueJobs and heartbeat check it
+ * on every poll, not just at registration.
+ *
+ * days === '' clears the expiry (permanent — today's default for every
+ * existing sender). A positive integer sets/extends it from NOW, not from
+ * whatever the previous expiry was — calling this twice with 7 gives 7 more
+ * days from the moment of the second call, not 14 from the first.
+ */
+function setSenderExpiry(email, days) {
+  const admin = requireAdmin_();
+  const clean = String(email || '').toLowerCase().trim();
+  const sender = findRow_('Senders', clean);
+  if (!sender) throw new Error('No such sender: ' + email + ' — they need to onboard first');
+
+  if (days === '' || days === null || days === undefined) {
+    updateRow_('Senders', clean, { sends_expire_at: '' });
+    logEvent_(admin, 'admin_action', { senderEmail: clean, detail: { action: 'sender_expiry_cleared' } });
+    return { email: clean, expiresAt: null };
+  }
+
+  const n = Math.floor(Number(days));
+  if (!isFinite(n) || n < 1 || n > 365) throw new Error('Days must be a whole number between 1 and 365, or blank for permanent');
+  const expiresAt = new Date(Date.now() + n * 24 * 60 * 60 * 1000);
+  updateRow_('Senders', clean, { sends_expire_at: expiresAt });
+  logEvent_(admin, 'admin_action', { senderEmail: clean, detail: { action: 'sender_expiry_set', days: n } });
+  return { email: clean, expiresAt: expiresAt.toISOString() };
+}
+
 /** The dashboard + track view — every grant ever issued, current status, who issued it. */
 function listAccessGrants() {
   requireAdmin_();

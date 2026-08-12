@@ -171,6 +171,24 @@ check('isAuthorizedAdmin_ checks both the permanent allowlist and time-boxed gra
   if (!/isAccessGrantValid_/.test(fn[0])) throw new Error('time-boxed grant path missing — access grants would silently do nothing');
 });
 
+check('time-boxed sending access is admin-controlled, never self-declared by the registering agent', () => {
+  const src = readFileSync('gateway/AgentApi.gs', 'utf8');
+  const sig = src.match(/function registerSender\(([^)]*)\)/);
+  if (!sig) throw new Error('registerSender not found');
+  if (/days|expir/i.test(sig[1]))
+    throw new Error('registerSender\'s parameter list appears to accept a self-declared expiry — gateway/ is ANYONE_ANONYMOUS, so that would let anyone grant themselves an arbitrary sending window. Params: ' + sig[1]);
+  if (!/pollDueJobs[\s\S]*?senderSendingExpired_/.test(src)) throw new Error('pollDueJobs does not check sending expiry — a lapsed grant would keep sending');
+  if (!/heartbeat[\s\S]*?senderSendingExpired_/.test(src)) throw new Error('heartbeat does not derive expired status for the agent to see');
+});
+
+check('setSenderExpiry validates the day range and clears cleanly with a blank value', () => {
+  const src = readFileSync('admin/Access.gs', 'utf8');
+  const fn = src.match(/function setSenderExpiry[\s\S]*?\n\}/);
+  if (!fn) throw new Error('setSenderExpiry not found');
+  if (!/n < 1 \|\| n > 365/.test(fn[0])) throw new Error('day range is not bounded 1-365');
+  if (!/sends_expire_at: ''/.test(fn[0])) throw new Error('a blank days value does not clear the expiry');
+});
+
 check('only admin/Store.gs (and its synced copy) may reference SpreadsheetApp', () => {
   // Real violation caught while building admin/Monitor.gs: it called
   // SpreadsheetApp.openById directly in three places, breaking the one

@@ -91,19 +91,25 @@ function manuallySuppressBulk(text, reason) {
 function senderStatus() {
   requireAdmin_();
   const staleMs = GOVERNANCE.agentStaleMinutes * 60 * 1000;
+  const now = new Date();
   return readRows_('Senders').map(function (s) {
     const caps = s.capabilities || {};
     const lastBeat = s.last_heartbeat ? new Date(s.last_heartbeat) : null;
+    const sendsExpired = !!s.sends_expire_at && new Date(s.sends_expire_at) <= now;
     return {
       email: s.email,
       displayName: s.display_name,
-      status: s.status,
+      status: sendsExpired ? 'expired' : s.status,
       agentVersion: s.agent_version,
       lastHeartbeat: s.last_heartbeat,
-      stale: !lastBeat || (new Date() - lastBeat) > staleMs,
+      stale: !lastBeat || (now - lastBeat) > staleMs,
       transport: caps.transport || 'unknown',
       signalsWorking: caps.signals === true,
       providerQuota: caps.providerQuota == null ? 'unknown' : caps.providerQuota,
+      sendsExpireAt: s.sends_expire_at || null,
+      sendsExpired: sendsExpired,
+      sendsDaysLeft: (!sendsExpired && s.sends_expire_at)
+        ? Math.ceil((new Date(s.sends_expire_at) - now) / 86400000) : null,
     };
   });
 }

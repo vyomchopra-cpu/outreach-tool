@@ -65,8 +65,22 @@ function registerSender(email, secretPlain, displayName, timezone) {
     last_heartbeat: new Date(),
     secret_hash: sha256Hex_(secretPlain),
     consent_recorded_at: new Date(),
+    // Blank = permanent (today's default, unchanged). Time-boxing sending
+    // capability is deliberately an ADMIN action (admin/Access.gs
+    // setSenderExpiry), never something the registering agent declares about
+    // itself — gateway/ is ANYONE_ANONYMOUS (see this file's header), so a
+    // self-declared "days" here would let anyone grant themselves an
+    // arbitrary window. The exec authorizes once (real Google OAuth consent,
+    // unavoidable and correct); an admin separately controls how long that
+    // authorization is allowed to actually send for.
+    sends_expire_at: '',
   });
   logEvent_(email, 'onboard', { senderEmail: email, detail: { action: 'register' } });
+}
+
+/** True once a time-boxed sending grant has lapsed. Blank sends_expire_at means permanent — never expires. */
+function senderSendingExpired_(senderRow) {
+  return !!senderRow.sends_expire_at && new Date(senderRow.sends_expire_at) <= new Date();
 }
 
 /**
@@ -83,7 +97,12 @@ function heartbeat(email, secret, agentVersion, capabilities) {
     agent_version: agentVersion,
     capabilities: capabilities || null,
   });
-  return { killSwitch: isKillSwitchOn_(), status: sender.status };
+  // 'expired' is derived, not stored — a time-boxed grant lapsing shouldn't
+  // require a write to flip a status column, and the agent needs to see it
+  // reflected the moment the clock passes expires_at, not on whatever cadence
+  // something else might re-check the Sheet.
+  const status = senderSendingExpired_(sender) ? 'expired' : sender.status;
+  return { killSwitch: isKillSwitchOn_(), status: status };
 }
 
 /**
@@ -141,6 +160,7 @@ function pollDueJobs(email, secret) {
   const sender = requireSender_(email, secret);
   if (isKillSwitchOn_()) return [];
   if (sender.status !== 'active') return [];
+  if (senderSendingExpired_(sender)) return []; // time-boxed grant lapsed — see admin/Access.gs setSenderExpiry
 
   const capToday = capForSenderToday_(sender.ramp_start_date, new Date(), DAILY_CAP_RAMP, sender.daily_cap_override || null);
   const sentToday = sentTodayCountFor_(sender);

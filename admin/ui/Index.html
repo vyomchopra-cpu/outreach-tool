@@ -743,6 +743,39 @@
   }
   $('btnRefreshGrants').onclick = refreshGrants;
 
+  // ── sending access (time-boxed) ─────────────────────────────
+  function refreshSendingAccess() {
+    google.script.run.withSuccessHandler(function (senders) {
+      $('sendingAccessList').innerHTML = senders.length ? senders.map(function (s) {
+        const chip = s.sendsExpired ? 'bad' : (s.sendsDaysLeft != null ? 'warn' : 'good');
+        const label = s.sendsExpired ? 'expired' : (s.sendsDaysLeft != null ? s.sendsDaysLeft + ' day(s) left' : 'permanent');
+        return '<div class="row"><span>' + esc(s.email)
+          + '<div class="hint">' + esc(s.displayName) + '</div></span>'
+          + '<span class="chip ' + chip + '">' + label + '</span></div>';
+      }).join('') : '<div class="empty">No senders onboarded yet.</div>';
+    }).senderStatus();
+  }
+  refreshSendingAccess();
+
+  $('btnSetSenderExpiry').onclick = function () {
+    const email = $('expirySenderEmail').value.trim();
+    const days = $('expiryDays').value;
+    if (!email) { setMsg('senderExpiryStatus', 'Enter a sender email first.', 'bad'); return; }
+    if (!days) { setMsg('senderExpiryStatus', 'Enter a number of days, or use "Make permanent" to clear an expiry.', 'bad'); return; }
+    google.script.run.withSuccessHandler(function (r) {
+      setMsg('senderExpiryStatus', r.email + ' can send through ' + new Date(r.expiresAt).toLocaleDateString() + '.', 'good');
+      refreshSendingAccess();
+    }).withFailureHandler(fail('senderExpiryStatus')).setSenderExpiry(email, days);
+  };
+  $('btnClearSenderExpiry').onclick = function () {
+    const email = $('expirySenderEmail').value.trim();
+    if (!email) { setMsg('senderExpiryStatus', 'Enter a sender email first.', 'bad'); return; }
+    google.script.run.withSuccessHandler(function () {
+      setMsg('senderExpiryStatus', email + ' set to permanent sending access.', 'good');
+      refreshSendingAccess();
+    }).withFailureHandler(fail('senderExpiryStatus')).setSenderExpiry(email, '');
+  };
+
   // ── shared chrome ─────────────────────────────────────────────
   function applyKillSwitch(on) {
     const el = $('killSwitchState');

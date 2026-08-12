@@ -34,3 +34,28 @@
   <button id="btnRefreshGrants" class="secondary">Refresh</button>
   <div id="grantsList" style="margin-top:10px"></div>
 </div>
+
+<div class="card">
+  <h2><span class="num">✉</span> Sending access — time-boxed</h2>
+  <div class="hint">
+    This is different from console access above. Sending under someone's own
+    name still needs <strong>them</strong> to authorize their own agent once —
+    a real Google OAuth consent screen, Operations tab → agent Onboard link —
+    there's no way around that step and no reason to want one; it's what
+    guarantees this tool never holds their credentials. What you control here
+    is how many days that authorization is allowed to keep sending. It stops
+    on its own after that, with no further action needed from either of you.
+  </div>
+  <div class="cols">
+    <div>
+      <label>Sender email <span class="hint">must already be onboarded</span></label>
+      <input type="text" id="expirySenderEmail" placeholder="colleague@moveinsync.com">
+      <label>Days of sending access <span class="hint">blank = permanent</span></label>
+      <input type="number" id="expiryDays" min="1" max="365" placeholder="e.g. 14">
+      <button id="btnSetSenderExpiry">Set / extend</button>
+      <button id="btnClearSenderExpiry" class="secondary">Make permanent</button>
+      <div id="senderExpiryStatus" class="msg"></div>
+    </div>
+    <div id="sendingAccessList" class="hint">Loading…</div>
+  </div>
+</div>
