@@ -86,10 +86,48 @@ function heartbeat(email, secret, agentVersion, capabilities) {
   return { killSwitch: isKillSwitchOn_(), status: sender.status };
 }
 
+/**
+ * Seed sends go to our own test mailboxes, not to prospects. They are queued
+ * with a synthetic recipient id rather than a Recipients row, because there is
+ * no prospect to record — which means every lookup path has to know about them
+ * explicitly. (It didn't, originally: pollDueJobs looked the id up in
+ * Recipients, got null, and silently dropped the job, so seed sends were
+ * queued and never delivered.)
+ */
+const SEED_PREFIX = 'seed:';
+
+function isSeedRecipientId_(recipientId) {
+  return String(recipientId || '').indexOf(SEED_PREFIX) === 0;
+}
+
+/**
+ * A seed send still has to exercise the real merge path, so it carries the
+ * same placeholder values the admin console's preview uses — if a merge tag
+ * would break for a prospect, it breaks here too, which is the point.
+ */
+function syntheticSeedRecipient_(recipientId) {
+  return {
+    id: recipientId,
+    campaign_id: '',
+    email: recipientId.slice(SEED_PREFIX.length),
+    first_name: 'Sam',
+    last_name: 'Prospect',
+    company: 'Example Corp',
+    title: 'VP Engineering',
+    recipient_tz: '',
+    custom: {},
+    assigned_sender: '',
+    status: 'queued',
+    status_reason: '',
+  };
+}
+
+/** Prospect touches only — seed sends to our own mailboxes must not consume the outreach cap. */
 function sentTodayCountFor_(senderRow) {
   const todayLocal = formatInZoneViaUtilities_(new Date(), senderRow.timezone).slice(0, 10);
   return readRows_('Queue', function (q) {
     if (q.sender_email !== senderRow.email || q.status !== 'sent' || !q.sent_at) return false;
+    if (isSeedRecipientId_(q.recipient_id)) return false;
     return formatInZoneViaUtilities_(new Date(q.sent_at), senderRow.timezone).slice(0, 10) === todayLocal;
   }).length;
 }
@@ -114,16 +152,27 @@ function pollDueJobs(email, secret) {
     return q.sender_email === email && q.status === 'pending' && new Date(q.due_at_utc) <= now;
   }).sort(function (a, b) { return new Date(a.due_at_utc) - new Date(b.due_at_utc); });
 
-  return due.slice(0, allowance).map(function (q) {
-    const recipient = findRow_('Recipients', q.recipient_id);
+  // Seed sends are not prospect touches: they bypass the daily allowance
+  // (their volume is bounded by SEED_MAILBOXES) and, on the agent side, the
+  // send window — a render check to our own inbox at 9pm harms nobody, and
+  // requiring one to wait until tomorrow morning would make verifying a
+  // campaign before launch impractical.
+  const seeds = due.filter(function (q) { return isSeedRecipientId_(q.recipient_id); });
+  const prospects = due.filter(function (q) { return !isSeedRecipientId_(q.recipient_id); });
+
+  return seeds.concat(prospects.slice(0, allowance)).map(function (q) {
+    const isSeed = isSeedRecipientId_(q.recipient_id);
+    const recipient = isSeed ? syntheticSeedRecipient_(q.recipient_id) : findRow_('Recipients', q.recipient_id);
     const campaign = findRow_('Campaigns', q.campaign_id);
-    if (!recipient || recipient.status === 'suppressed' || isSuppressed_(recipient.email)) return null;
+    if (!recipient) return null;
+    if (!isSeed && (recipient.status === 'suppressed' || isSuppressed_(recipient.email))) return null;
     return {
       queueId: q.id,
       campaign: campaign,
       recipient: recipient,
       idempotencyKey: q.idempotency_key,
       senderDisplayName: sender.display_name,
+      isSeed: isSeed,
     };
   }).filter(Boolean);
 }
@@ -134,7 +183,8 @@ function reportSent(email, secret, queueId, gmailMessageId) {
   if (!q) throw new Error('No such queue row: ' + queueId);
   if (q.status === 'sent') return; // idempotent — already recorded, agent retried the report
   updateRowAt_('Queue', q._row, { status: 'sent', sent_at: new Date(), sent_message_id: gmailMessageId });
-  updateRow_('Recipients', q.recipient_id, { status: 'sent' });
+  // Seed rows have no Recipients row to update — updateRow_ would throw.
+  if (!isSeedRecipientId_(q.recipient_id)) updateRow_('Recipients', q.recipient_id, { status: 'sent' });
   logEvent_(email, 'send', { campaignId: q.campaign_id, recipientId: q.recipient_id, senderEmail: email, detail: { queueId: queueId } });
 }
 
@@ -227,7 +277,9 @@ function reportFailed(email, secret, queueId, errorMessage) {
   const attempts = (q.attempts || 0) + 1;
   if (attempts >= GOVERNANCE.maxSendAttempts) {
     updateRowAt_('Queue', q._row, { status: 'failed', attempts: attempts, error: errorMessage });
-    updateRow_('Recipients', q.recipient_id, { status: 'failed', status_reason: errorMessage });
+    if (!isSeedRecipientId_(q.recipient_id)) {
+      updateRow_('Recipients', q.recipient_id, { status: 'failed', status_reason: errorMessage });
+    }
   } else {
     const nextDue = new Date(Date.now() + backoffMinutes_(attempts) * 60000);
     updateRowAt_('Queue', q._row, { attempts: attempts, error: errorMessage, due_at_utc: nextDue });

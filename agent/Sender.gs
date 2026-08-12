@@ -40,7 +40,10 @@ function processJob_(email, secret, job) {
     // Independent window check: sender-mode uses this agent's own project
     // timezone (appsscript.json), recipient-mode uses the recipient's own tz.
     const timeZone = job.campaign.tz_mode === 'recipient' ? job.recipient.recipient_tz : Session.getScriptTimeZone();
-    if (!isWithinSendWindow_(new Date(), timeZone, SEND_WINDOW, formatInZoneViaUtilities_)) {
+    // Seed sends go to our own mailboxes to check rendering — holding one until
+    // 9am tomorrow would make verifying a campaign before launch impractical,
+    // and there is no prospect on the other end to disturb.
+    if (!job.isSeed && !isWithinSendWindow_(new Date(), timeZone, SEND_WINDOW, formatInZoneViaUtilities_)) {
       Logger.log('Skipping ' + job.queueId + ' — outside send window on agent-side re-check (' + timeZone + ')');
       return; // left pending; central already scheduled it inside the window, this should be rare
     }

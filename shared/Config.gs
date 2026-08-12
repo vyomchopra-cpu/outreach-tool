@@ -28,13 +28,18 @@ const GOVERNANCE = {
 
 const MAX_HTML_BYTES = 102 * 1024; // Gmail clips above this — hard preflight fail
 
+/**
+ * Where seed (pre-launch render check) sends go. Pilot starts with the admin's
+ * own mailbox; the point of a matrix is catching client-specific rendering
+ * breakage, so add real Outlook desktop / Apple Mail / mobile addresses before
+ * any campaign whose look actually matters. Seed sends bypass the daily cap
+ * and the send window (gateway/AgentApi.gs) — they go to us, not to prospects.
+ */
 const SEED_MAILBOXES = [
-  // 'seed-gmail-web@moveinsync.com',
-  // 'seed-gmail-ios@moveinsync.com',
-  // 'seed-gmail-android@moveinsync.com',
-  // 'seed-outlook-desktop@...',
-  // 'seed-outlook-web@...',
+  'vyom.chopra@moveinsync.com',
+  // 'seed-outlook-desktop@...',   // the Word rendering engine — the usual culprit
   // 'seed-apple-mail@...',
+  // 'seed-gmail-mobile@...',
 ];
 
 const REPLY_TO_DOMAIN = 'moveinsync.com';

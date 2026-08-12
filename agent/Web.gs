@@ -24,6 +24,10 @@ function doGet(e) {
     return html_(renderManualSetupHtml_());
   }
 
+  if (p.testsend === '1') {
+    return html_(runSelfTestSend_());
+  }
+
   if (p.onboard === '1') {
     try {
       const r = onboardSender(p.displayName || email, p.timezone || 'Asia/Kolkata');
@@ -45,10 +49,63 @@ function doGet(e) {
     + '<p>Signed in as <strong>' + email + '</strong></p>'
     + '<ul>'
     + '<li><a href="?diagnose=1">Run diagnostics</a> — check every capability</li>'
+    + '<li><a href="?testsend=1">Send a test to yourself</a> — proves the real send path end to end</li>'
     + '<li><a href="?setup=1">Manual filter setup</a> — the four steps to sort replies</li>'
     + '<li><code>?onboard=1&amp;displayName=Your+Name&amp;timezone=Asia/Kolkata</code> — register + start sending</li>'
     + '<li><code>?disconnect=1</code> — pause sending immediately</li>'
     + '</ul>');
+}
+
+/**
+ * Sends one message to the signed-in exec's own address, through the real
+ * render + merge + transport path — the same functions a live campaign uses,
+ * not a simplified imitation. Proves end-to-end sending works without needing
+ * a campaign, recipients, preflight, or the 5-minute trigger to have fired.
+ *
+ * Hard-wired to the caller's own mailbox: it takes no recipient parameter, so
+ * this route cannot be turned into a way to send mail to anyone else.
+ */
+function runSelfTestSend_() {
+  const email = getMyEmail_();
+  const body = '<p>Hi {{firstName}},</p>'
+    + '<p>This is a test send from the MIS Outreach agent, rendered through the '
+    + 'same merge and transport path a real campaign uses.</p>'
+    + '<p>If the greeting says <strong>Sam</strong> and the company reads '
+    + '<strong>Example Corp</strong>, merge tags work. If this arrived at all, '
+    + 'the send transport works.</p>'
+    + '<p style="color:#666;font-size:12px">Unsubscribe: {{unsubscribe}}</p>';
+
+  const sampleRecipient = {
+    first_name: 'Sam', last_name: 'Prospect',
+    company: 'Example Corp', title: 'VP Engineering', custom: {},
+  };
+
+  try {
+    const rendered = render_(body, sampleRecipient, { unsubscribe: unsubscribeAddress_() });
+    const result = sendMessage_({
+      fromDisplayName: 'MIS Outreach (test)',
+      fromEmail: email,
+      toEmail: email,
+      replyTo: replyToAddress_(),
+      subject: 'MIS Outreach — transport test',
+      html: rendered.html,
+      text: rendered.text,
+    });
+    return '<h3>Test send dispatched</h3>'
+      + '<ul>'
+      + '<li>To: <strong>' + email + '</strong></li>'
+      + '<li>Transport: <strong>' + result.transport + '</strong></li>'
+      + '<li>Reply-To: <code>' + replyToAddress_() + '</code></li>'
+      + '<li>Rendered size: ' + rendered.bytes + ' bytes (limit ' + MAX_HTML_BYTES + ')</li>'
+      + '<li>RFC Message-ID captured: ' + (result.rfcMessageId ? 'yes' : 'no — expected under the mailapp transport') + '</li>'
+      + '</ul>'
+      + '<p>Check your inbox. Reply to it and the reply should land on '
+      + '<code>' + replyToAddress_() + '</code> — which is what the '
+      + '<a href="?setup=1">Outreach/Replies filter</a> sorts on.</p>';
+  } catch (err) {
+    return '<h3>Test send failed</h3><p style="color:#c0392b">' + err.message + '</p>'
+      + '<p><a href="?diagnose=1">Run diagnostics</a></p>';
+  }
 }
 
 function html_(body) {

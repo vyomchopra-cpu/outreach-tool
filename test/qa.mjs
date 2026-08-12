@@ -97,6 +97,25 @@ check('callCentral_ retries transport failures but never a structured rejection'
     throw new Error('callCentralRaw_ appears to retry structured rejections');
 });
 
+check('seed queue rows are resolved everywhere they are read (they have no Recipients row)', () => {
+  const src = readFileSync('gateway/AgentApi.gs', 'utf8');
+  if (!/isSeedRecipientId_/.test(src)) throw new Error('no seed-row awareness — pollDueJobs would look a seed id up in Recipients, get null, and silently drop the send');
+  if (!/syntheticSeedRecipient_/.test(src)) throw new Error('no synthetic recipient for seed sends');
+  // reportSent/reportFailed must not try to update a Recipients row that cannot exist.
+  const reportSent = src.match(/function reportSent[\s\S]*?\n\}/);
+  if (reportSent && /updateRow_\('Recipients'/.test(reportSent[0]) && !/isSeedRecipientId_/.test(reportSent[0]))
+    throw new Error('reportSent updates Recipients unconditionally — throws on seed rows');
+});
+
+check('test-send route cannot be aimed at anyone but the signed-in user', () => {
+  const src = readFileSync('agent/Web.gs', 'utf8');
+  const fn = src.match(/function runSelfTestSend_[\s\S]*?\n\}/);
+  if (!fn) throw new Error('runSelfTestSend_ not found');
+  if (/p\.(to|email|recipient)/.test(fn[0]))
+    throw new Error('test send reads a recipient from the query string — that turns a debug route into an open relay');
+  if (!/toEmail:\s*email/.test(fn[0])) throw new Error('test send does not hard-wire the recipient to getMyEmail_()');
+});
+
 check('unsubscribe is a blocking preflight check, not a warning', () => {
   const src = readFileSync('admin/Preflight.gs', 'utf8');
   if (!/\{\{unsubscribe\}\}/.test(src)) throw new Error('preflight does not require an unsubscribe token in the body');
