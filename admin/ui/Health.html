@@ -29,6 +29,22 @@
 </div>
 
 <div class="card">
+  <h2><span class="num">🔔</span> Monitoring &amp; alerts</h2>
+  <div class="hint">
+    Runs automatically every 15 minutes — kill switch state, stale agents, a
+    growing backlog of overdue sends, bounce-rate breaches, and unremoved
+    risky addresses. Alerts go to Google Chat if configured (Script Properties
+    → <code>CHAT_WEBHOOK_URL</code>) — see <code>admin/Monitor.gs</code>'s
+    header comment for one-time setup. Without it, incidents still get
+    recorded here, just no push.
+  </div>
+  <button id="btnCheckNow" class="secondary">Check now</button>
+  <button id="btnTestAlert" class="secondary">Send test alert</button>
+  <div id="monitorStatus" class="msg"></div>
+  <div id="incidentsList" style="margin-top:10px"></div>
+</div>
+
+<div class="card">
   <h2><span class="num">§</span> Audit trail</h2>
   <div class="hint">Append-only. Every send, admin action, config change, and halt — who, what, when. Never message content.</div>
   <div id="healthEvents"></div>

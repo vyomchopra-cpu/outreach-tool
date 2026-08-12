@@ -133,6 +133,15 @@ check('REOON_API_KEY is never a real key in shared/Config.gs — it must stay em
   if (m[1] !== '') throw new Error('REOON_API_KEY is non-empty in a file that gets committed to git — move it to a Script Property instead');
 });
 
+check('setReoonApiKey never logs the raw key value, only its length', () => {
+  const src = readFileSync('admin/EmailVerify.gs', 'utf8');
+  const fn = src.match(/function setReoonApiKey[\s\S]*?\n\}/);
+  if (!fn) throw new Error('setReoonApiKey not found');
+  if (/logEvent_\([^)]*clean/.test(fn[0]) && !/keyLength/.test(fn[0]))
+    throw new Error('the raw key may be reaching the audit log');
+  if (!/keyLength/.test(fn[0])) throw new Error('no audit trail at all for a key rotation — should log the action, just never the value');
+});
+
 check('Reoon key is read from Script Properties, and verification is a no-op without one configured', () => {
   const src = readFileSync('admin/EmailVerify.gs', 'utf8');
   if (!/PropertiesService\.getScriptProperties\(\)\.getProperty\('REOON_API_KEY'\)/.test(src))
@@ -160,6 +169,44 @@ check('isAuthorizedAdmin_ checks both the permanent allowlist and time-boxed gra
   if (!fn) throw new Error('isAuthorizedAdmin_ not found');
   if (!/ADMIN_ALLOWLIST/.test(fn[0])) throw new Error('permanent allowlist path missing');
   if (!/isAccessGrantValid_/.test(fn[0])) throw new Error('time-boxed grant path missing — access grants would silently do nothing');
+});
+
+check('only admin/Store.gs (and its synced copy) may reference SpreadsheetApp', () => {
+  // Real violation caught while building admin/Monitor.gs: it called
+  // SpreadsheetApp.openById directly in three places, breaking the one
+  // invariant that makes a future Firestore migration a one-file change.
+  // Nothing had ever enforced the rule Store.gs's own header comment states.
+  const ALLOWED = new Set(['admin/Store.gs', 'gateway/Store.gs']);
+  const offenders = [];
+  ['admin', 'agent', 'gateway'].forEach(dir => {
+    readdirSync(dir).filter(f => f.endsWith('.gs')).forEach(f => {
+      const path = `${dir}/${f}`;
+      if (ALLOWED.has(path)) return;
+      if (/\bSpreadsheetApp\b/.test(stripComments_(readFileSync(path, 'utf8')))) offenders.push(path);
+    });
+  });
+  if (offenders.length) throw new Error('SpreadsheetApp referenced outside Store.gs: ' + offenders.join(', '));
+});
+
+check('every .gs file in admin/, agent/, gateway/, and shared/ is syntactically valid', () => {
+  // Caught a real bug writing this: an unescaped apostrophe inside a single-
+  // quoted string in admin/Monitor.gs ("their agent's authorization") was a
+  // silent syntax error that only the earlier, narrower client-script check
+  // couldn't see — it only ever looked at Index.html's <script> block, never
+  // at the .gs files themselves. new Function() parses (never executes) each
+  // one, which is enough to catch this whole class of error before deploy.
+  const dirs = ['admin', 'agent', 'gateway', 'shared'];
+  const broken = [];
+  dirs.forEach(dir => {
+    readdirSync(dir).filter(f => f.endsWith('.gs')).forEach(f => {
+      try {
+        new Function(readFileSync(`${dir}/${f}`, 'utf8'));
+      } catch (e) {
+        broken.push(`${dir}/${f}: ${e.message}`);
+      }
+    });
+  });
+  if (broken.length) throw new Error(broken.join('; '));
 });
 
 check('the client script is syntactically valid (a broken <script> block is a blank white page, not an error)', () => {

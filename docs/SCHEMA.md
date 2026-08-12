@@ -136,3 +136,16 @@ change. `ADMIN_ALLOWLIST` (`shared/Config.gs`) is the separate, permanent list.
 | `granted_at` / `expires_at` | datetime | `expires_at` is checked on every request, not cached at sign-in |
 | `revoked` | boolean | Set by `revokeAccess` — takes effect on the next request, not next login |
 | `note` | string | Free text, why the grant was made |
+
+## `Incidents`
+
+Append-only detector output — see `admin/Monitor.gs`. Same file every other
+tab goes through (`Store.gs`); nothing else may call `SpreadsheetApp` directly.
+
+| Column | Type | Notes |
+|---|---|---|
+| `ts` | datetime | |
+| `severity` | enum | `critical` · `warn` · `info` |
+| `detector` | string | Which check fired — `kill_switch_on`, `stale_senders`, `queue_backlog`, `bounce_rate`, `unverified_risk`, `gcp_available` |
+| `summary` / `detail` | string | Detail always names the specific next action, not just the symptom |
+| `notified` | string | `chat` · `no channel configured` · `suppressed (cooldown)` |

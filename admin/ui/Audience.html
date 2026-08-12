@@ -18,6 +18,12 @@
 <div class="card">
   <h2><span class="num">✓</span> Hard checks <span id="reoonBadge" class="chip" style="margin-left:4px"></span></h2>
   <div class="hint">Reoon checks each address for valid syntax, disposable domains, role accounts (info@, sales@ — deliverable but not a person), and a working mail server. A bad list costs deliverability more than a slow one costs time.</div>
+  <div id="reoonKeyForm" style="display:none">
+    <label>Reoon API key <span class="hint">stored in this project's private Script Properties — never in the repo</span></label>
+    <input type="text" id="reoonKeyInput" placeholder="paste key, then Save">
+    <button id="btnSaveReoonKey" class="secondary">Save key</button>
+    <div id="reoonKeyStatus" class="msg"></div>
+  </div>
   <button id="btnVerifyReoon" class="secondary">Verify imported recipients</button>
   <div id="reoonStatus" class="msg"></div>
   <div id="reoonResults" style="margin-top:10px"></div>

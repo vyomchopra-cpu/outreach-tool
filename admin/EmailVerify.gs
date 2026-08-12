@@ -34,6 +34,30 @@ function getReoonStatus() {
   return { configured: reoonConfigured_(), mode: REOON_MODE };
 }
 
+/**
+ * The ONLY place a real Reoon key should ever be typed. Goes straight into
+ * this project's private Script Properties via google.script.run — never a
+ * URL parameter (would sit in browser history / server logs), never a file
+ * this repo commits. See shared/Config.gs's REOON_API_KEY comment.
+ */
+function setReoonApiKey(key) {
+  const admin = requireAdmin_();
+  const clean = String(key || '').trim();
+  if (!clean) throw new Error('Key was empty');
+  if (clean.length < 10) throw new Error('That does not look like a real API key');
+  PropertiesService.getScriptProperties().setProperty('REOON_API_KEY', clean);
+  logEvent_(admin, 'config_change', { detail: { action: 'set_reoon_key', keyLength: clean.length } }); // length only — never the value
+  return { configured: true };
+}
+
+/** For an admin who wants to rotate or pull a key back out. */
+function clearReoonApiKey() {
+  const admin = requireAdmin_();
+  PropertiesService.getScriptProperties().deleteProperty('REOON_API_KEY');
+  logEvent_(admin, 'config_change', { detail: { action: 'clear_reoon_key' } });
+  return { configured: false };
+}
+
 function reoonUrlFor_(email, apiKey) {
   return REOON_API_BASE + '?email=' + encodeURIComponent(email)
     + '&key=' + encodeURIComponent(apiKey) + '&mode=' + encodeURIComponent(REOON_MODE);

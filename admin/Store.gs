@@ -30,6 +30,8 @@ const SCHEMA = {
   // edit + redeploy — see admin/Access.gs. ADMIN_ALLOWLIST (shared/Config.gs)
   // is the standing/permanent list; this is the temporary one.
   AccessGrants: ['email', 'display_name', 'granted_by', 'granted_at', 'expires_at', 'revoked', 'note'],
+  // Append-only detector output — see admin/Monitor.gs.
+  Incidents: ['ts', 'severity', 'detector', 'summary', 'detail', 'notified'],
 };
 
 /** Bootstraps any missing tab with its header row. Idempotent — safe to call every deploy. */
@@ -57,6 +59,7 @@ const PRIMARY_KEY = {
   Health: null, // composite (date, sender_email) — see upsertHealth_
   Control: 'key',
   AccessGrants: 'email',
+  Incidents: null,
 };
 
 /** Global kill switch, checked by the agent every tick before it does anything else. */

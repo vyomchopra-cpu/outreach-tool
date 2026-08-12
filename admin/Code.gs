@@ -40,6 +40,20 @@ function doGet(e) {
     }
   }
 
+  // Same reasoning as ?bootstrap=1 — installing the health-monitoring trigger
+  // is a one-time setup step, and the editor's Run button proved unreliable
+  // enough times this session that nothing new should depend on it working.
+  if (e.parameter && e.parameter.setupMonitoring === '1') {
+    try {
+      setupHealthMonitoring_();
+      return HtmlService.createHtmlOutput('<p>Health monitoring installed — checking every '
+        + MONITOR_INTERVAL_MIN + ' minutes. Set <code>CHAT_WEBHOOK_URL</code> in Script Properties '
+        + 'for alerts, then use the Health tab\'s "Send test alert" to confirm it fires.</p>');
+    } catch (err) {
+      return HtmlService.createHtmlOutput('<p>setupHealthMonitoring_ failed: ' + err.message + '</p>');
+    }
+  }
+
   const template = HtmlService.createTemplateFromFile('ui/Index');
   template.adminEmail = email;
   return template.evaluate()

@@ -251,7 +251,7 @@
       document.querySelectorAll('.tab').forEach(function (x) { x.classList.remove('active'); });
       b.classList.add('active');
       $('tab-' + b.dataset.tab).classList.add('active');
-      if (b.dataset.tab === 'health') refreshHealth();
+      if (b.dataset.tab === 'health') { refreshHealth(); refreshIncidents(); }
       if (b.dataset.tab === 'launch') refreshReadiness();
       if (b.dataset.tab === 'access') refreshGrants();
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -464,13 +464,24 @@
     safe: 'safe', valid: 'valid', invalid: 'invalid', disposable: 'disposable',
     role_account: 'role account', spamtrap: 'spamtrap', catch_all: 'catch-all', unknown: 'unknown',
   };
-  google.script.run.withSuccessHandler(function (r) {
+  function applyReoonStatus(r) {
     const badge = $('reoonBadge');
     badge.textContent = r.configured ? 'configured · ' + r.mode + ' mode' : 'not configured';
     badge.className = 'chip ' + (r.configured ? 'good' : 'warn');
     $('btnVerifyReoon').disabled = !r.configured;
-    if (!r.configured) $('btnVerifyReoon').title = 'Set REOON_API_KEY in Script Properties first';
-  }).getReoonStatus();
+    $('reoonKeyForm').style.display = r.configured ? 'none' : 'block';
+  }
+  google.script.run.withSuccessHandler(applyReoonStatus).getReoonStatus();
+
+  $('btnSaveReoonKey').onclick = function () {
+    const key = $('reoonKeyInput').value.trim();
+    if (!key) { setMsg('reoonKeyStatus', 'Paste a key first.', 'bad'); return; }
+    google.script.run.withSuccessHandler(function (r) {
+      $('reoonKeyInput').value = '';
+      setMsg('reoonStatus', 'Reoon key saved.', 'good');
+      applyReoonStatus({ configured: r.configured, mode: 'power' });
+    }).withFailureHandler(fail('reoonKeyStatus')).setReoonApiKey(key);
+  };
 
   $('btnVerifyReoon').onclick = function () {
     if (!currentCampaignId) { setMsg('reoonStatus', 'Save the campaign and import recipients first.', 'bad'); return; }
@@ -659,6 +670,39 @@
     }).getHealthSnapshot();
   }
   $('btnRefreshHealth').onclick = refreshHealth;
+
+  function refreshIncidents() {
+    google.script.run.withSuccessHandler(function (incidents) {
+      hideBar();
+      $('incidentsList').innerHTML = incidents.length ? incidents.map(function (inc) {
+        const colour = inc.severity === 'critical' ? 'bad' : inc.severity === 'warn' ? 'warn' : 'good';
+        return '<div class="row"><span>'
+          + '<span class="chip ' + colour + '" style="margin-right:6px">' + esc(inc.severity) + '</span>'
+          + '<strong>' + esc(inc.summary) + '</strong>' + (inc.count > 1 ? ' <span class="hint">×' + inc.count + '</span>' : '')
+          + '<div class="hint" style="white-space:normal">' + esc(inc.detail) + '</div>'
+          + '<div class="hint">' + (inc.ts ? new Date(inc.ts).toLocaleString() : '') + '  ·  ' + esc(inc.notified) + '</div>'
+          + '</span></div>';
+      }).join('') : '<div class="empty" style="color:var(--good)">No incidents recorded.</div>';
+    }).withFailureHandler(function (err) { hideBar(); $('incidentsList').innerHTML = '<div class="msg bad">' + esc(clean(err.message)) + '</div>'; })
+      .getRecentIncidents();
+  }
+
+  $('btnCheckNow').onclick = function () {
+    setMsg('monitorStatus', 'Checking…');
+    google.script.run.withSuccessHandler(function (r) {
+      setMsg('monitorStatus', r.incidents.length
+        ? r.incidents.length + ' issue(s) found — see below.'
+        : 'All clear.', r.incidents.length ? 'warn' : 'good');
+      refreshIncidents();
+    }).withFailureHandler(fail('monitorStatus')).runHealthCheckNow();
+  };
+
+  $('btnTestAlert').onclick = function () {
+    setMsg('monitorStatus', 'Sending…');
+    google.script.run.withSuccessHandler(function (r) {
+      setMsg('monitorStatus', r.sent ? 'Sent — check the Chat space.' : 'Not sent — CHAT_WEBHOOK_URL is not set in Script Properties.', r.sent ? 'good' : 'warn');
+    }).withFailureHandler(fail('monitorStatus')).sendTestAlert();
+  };
 
   // ── access grants ─────────────────────────────────────────────
   $('btnGrantAccess').onclick = function () {
