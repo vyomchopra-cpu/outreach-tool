@@ -65,6 +65,26 @@ const CENTRAL_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbyLM5Wyr9S_i
  */
 const AGENT_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbxP0ae8lcMhVYJg4dp5VeSYZAr7_benBZ3zF4CTTFGTyZAA2RhkwD9u-9epCZpGmqkt/exec';
 
+/**
+ * Reoon Email Verifier (emailverifier.reoon.com) — hard checks on recipient
+ * addresses before send: syntax, disposable-domain, role-account, and MX
+ * existence, with an optional real-time mailbox handshake in 'power' mode.
+ *
+ * Empty by default and MUST STAY THAT WAY IN THIS FILE. admin/EmailVerify.gs
+ * treats a blank key as "feature off" everywhere, not an error — importing
+ * and launching campaigns work identically with or without it configured.
+ * Put a real key in a Script Property instead (Project Settings > Script
+ * Properties, key REOON_API_KEY) so it never lands in git history; this
+ * constant is only the "did anyone configure it" switch. test/qa.mjs fails
+ * the build if this is ever non-empty, specifically to keep it that way.
+ *
+ * 'quick' mode checks syntax/disposable/role/MX only — fast, no mailbox
+ * contact. 'power' additionally does a real SMTP handshake to confirm the
+ * mailbox exists — slower, and Reoon bills it as a higher-cost check.
+ */
+const REOON_API_KEY = '';
+const REOON_MODE = 'quick';
+
 const AGENT_VERSION = '0.2.0';
 
 /**

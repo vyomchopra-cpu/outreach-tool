@@ -14,7 +14,7 @@ const SCHEMA = {
     'exec_approved_by', 'exec_approved_at', 'seed_passed_at', 'canary_released_at',
     'projected_completion'],
   Recipients: ['id', 'campaign_id', 'email', 'first_name', 'last_name', 'company', 'title',
-    'recipient_tz', 'custom', 'assigned_sender', 'status', 'status_reason'],
+    'recipient_tz', 'custom', 'assigned_sender', 'status', 'status_reason', 'verify_status'],
   Queue: ['id', 'campaign_id', 'recipient_id', 'sender_email', 'due_at_utc', 'status',
     'attempts', 'idempotency_key', 'sent_message_id', 'sent_at', 'error'],
   Signals: ['ts', 'sender_email', 'kind', 'gmail_message_id', 'in_reply_to', 'from_header',

@@ -118,6 +118,28 @@ check('every render_/applyMerge_ call site supplies send-time extras', () => {
   if (offenders.length) throw new Error(offenders.join('; '));
 });
 
+check('REOON_API_KEY is never a real key in shared/Config.gs — it must stay empty', () => {
+  const src = readFileSync('shared/Config.gs', 'utf8');
+  const m = src.match(/const REOON_API_KEY\s*=\s*'([^']*)'/);
+  if (!m) throw new Error('REOON_API_KEY declaration not found');
+  if (m[1] !== '') throw new Error('REOON_API_KEY is non-empty in a file that gets committed to git — move it to a Script Property instead');
+});
+
+check('Reoon key is read from Script Properties, and verification is a no-op without one configured', () => {
+  const src = readFileSync('admin/EmailVerify.gs', 'utf8');
+  if (!/PropertiesService\.getScriptProperties\(\)\.getProperty\('REOON_API_KEY'\)/.test(src))
+    throw new Error('reoonApiKey_ does not check Script Properties — a key could only ever come from the committed constant');
+  if (!/if \(!apiKey\) throw/.test(src)) throw new Error('verifyRecipientsWithReoon does not fail clearly when unconfigured');
+});
+
+check('removing unverifiable recipients never touches the permanent Suppression list', () => {
+  const src = readFileSync('admin/EmailVerify.gs', 'utf8');
+  const fn = src.match(/function removeUnverifiable[\s\S]*?\n\}/);
+  if (!fn) throw new Error('removeUnverifiable not found');
+  if (/addSuppression_/.test(fn[0]))
+    throw new Error('removeUnverifiable calls addSuppression_ — a bad address on ONE list must not imply a permanent, global, cross-campaign suppression');
+});
+
 check('access grants are domain-restricted and checked for revocation + expiry', () => {
   const src = readFileSync('admin/Access.gs', 'utf8');
   if (!/endsWith\('@' \+ REPLY_TO_DOMAIN\)/.test(src)) throw new Error('grantAccess does not enforce the internal-domain restriction');

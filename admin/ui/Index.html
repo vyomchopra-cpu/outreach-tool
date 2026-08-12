@@ -459,6 +459,47 @@
     }).withFailureHandler(fail('importStatus')).importRecipientsCsv(currentCampaignId, pendingCsvText);
   };
 
+  // ── Reoon hard checks ────────────────────────────────────────
+  const BUCKET_LABEL = {
+    safe: 'safe', valid: 'valid', invalid: 'invalid', disposable: 'disposable',
+    role_account: 'role account', spamtrap: 'spamtrap', catch_all: 'catch-all', unknown: 'unknown',
+  };
+  google.script.run.withSuccessHandler(function (r) {
+    const badge = $('reoonBadge');
+    badge.textContent = r.configured ? 'configured · ' + r.mode + ' mode' : 'not configured';
+    badge.className = 'chip ' + (r.configured ? 'good' : 'warn');
+    $('btnVerifyReoon').disabled = !r.configured;
+    if (!r.configured) $('btnVerifyReoon').title = 'Set REOON_API_KEY in Script Properties first';
+  }).getReoonStatus();
+
+  $('btnVerifyReoon').onclick = function () {
+    if (!currentCampaignId) { setMsg('reoonStatus', 'Save the campaign and import recipients first.', 'bad'); return; }
+    setMsg('reoonStatus', 'Checking against Reoon — this can take a moment for a large list…');
+    google.script.run.withSuccessHandler(function (r) {
+      if (r.checked === 0) { setMsg('reoonStatus', 'Nothing new to check — either no recipients yet, or all already verified.', ''); return; }
+      setMsg('reoonStatus', 'Checked ' + r.checked + '.', 'good');
+      const badBuckets = ['invalid', 'disposable', 'error_parse'].filter(function (b) { return r.buckets[b]; });
+      $('reoonResults').innerHTML = '<table class="mini">'
+        + Object.keys(r.buckets).map(function (b) {
+            const bad = badBuckets.indexOf(b) !== -1;
+            return '<tr><td>' + esc(BUCKET_LABEL[b] || b) + '</td>'
+              + '<td' + (bad ? ' style="color:var(--bad)"' : '') + '>' + r.buckets[b] + '</td></tr>';
+          }).join('') + '</table>'
+        + (badBuckets.length
+          ? '<button id="btnRemoveBad" class="danger" style="margin-top:10px">Remove ' + badBuckets.reduce(function (s, b) { return s + r.buckets[b]; }, 0) + ' invalid/disposable address(es)</button>'
+          : '');
+      if (badBuckets.length) {
+        $('btnRemoveBad').onclick = function () {
+          if (!confirm('Remove these from this campaign only? They stay in your original CSV and are not added to the permanent suppression list.')) return;
+          google.script.run.withSuccessHandler(function (rr) {
+            setMsg('reoonStatus', 'Removed ' + rr.removed + '.', 'good');
+            $('reoonResults').innerHTML = ''; refreshReadiness();
+          }).withFailureHandler(fail('reoonStatus')).removeUnverifiable(currentCampaignId, badBuckets);
+        };
+      }
+    }).withFailureHandler(fail('reoonStatus')).verifyRecipientsWithReoon(currentCampaignId);
+  };
+
   $('btnSuppress').onclick = function () {
     if (!confirm('Suppression is permanent and global — these addresses will never receive mail from any campaign or sender again.')) return;
     google.script.run.withSuccessHandler(function (r) {

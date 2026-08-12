@@ -16,6 +16,14 @@
 </div>
 
 <div class="card">
+  <h2><span class="num">✓</span> Hard checks <span id="reoonBadge" class="chip" style="margin-left:4px"></span></h2>
+  <div class="hint">Reoon checks each address for valid syntax, disposable domains, role accounts (info@, sales@ — deliverable but not a person), and a working mail server. A bad list costs deliverability more than a slow one costs time.</div>
+  <button id="btnVerifyReoon" class="secondary">Verify imported recipients</button>
+  <div id="reoonStatus" class="msg"></div>
+  <div id="reoonResults" style="margin-top:10px"></div>
+</div>
+
+<div class="card">
   <h2><span class="num">↯</span> Opt-outs &amp; replies</h2>
   <div class="hint">Automatic detection needs the Gmail API, which is unavailable here — so opt-outs an exec forwards are recorded manually. Suppression is permanent, global, and checked again at send time.</div>
   <div class="cols">

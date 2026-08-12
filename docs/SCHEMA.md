@@ -58,6 +58,7 @@ Column order below is authoritative — `Store.gs` bootstraps headers from it an
 | `assigned_sender` | string | Sticky — a prospect always hears from the same person |
 | `status` | enum | `queued` · `scheduled` · `sent` · `replied` · `bounced` · `unsubscribed` · `suppressed` · `failed` |
 | `status_reason` | string | |
+| `verify_status` | string? | Reoon's classification (`safe`/`invalid`/`disposable`/…), set by `verifyRecipientsWithReoon`. Blank until checked — the feature is optional, unconfigured by default. |
 
 ## `Queue`
 
@@ -121,3 +122,17 @@ Daily rollup driven by a nightly trigger, plus manual Postmaster entry.
 | `sent`, `bounced`, `replied`, `unsubscribed` | |
 | `bounce_rate` | Auto-halt above 3% rolling |
 | `complaint_rate` | Entered from Google Postmaster Tools; auto-halt above 0.1% |
+
+## `AccessGrants`
+
+Time-boxed console access, granted from the Access tab rather than a code
+change. `ADMIN_ALLOWLIST` (`shared/Config.gs`) is the separate, permanent list.
+
+| Column | Type | Notes |
+|---|---|---|
+| `email` | string | Primary key. Must be `@REPLY_TO_DOMAIN` — enforced at grant time. |
+| `display_name` | string | Derived from the local part; cosmetic only |
+| `granted_by` | string | The admin who issued it |
+| `granted_at` / `expires_at` | datetime | `expires_at` is checked on every request, not cached at sign-in |
+| `revoked` | boolean | Set by `revokeAccess` — takes effect on the next request, not next login |
+| `note` | string | Free text, why the grant was made |
