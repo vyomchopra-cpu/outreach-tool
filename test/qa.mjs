@@ -118,6 +118,14 @@ check('every render_/applyMerge_ call site supplies send-time extras', () => {
   if (offenders.length) throw new Error(offenders.join('; '));
 });
 
+check('package.json and AGENT_VERSION are the same version (see docs/RELEASE_PROCESS.md)', () => {
+  const pkgVersion = JSON.parse(readFileSync('package.json', 'utf8')).version;
+  const m = readFileSync('shared/Config.gs', 'utf8').match(/AGENT_VERSION\s*=\s*'([^']+)'/);
+  if (!m) throw new Error('AGENT_VERSION not found in shared/Config.gs');
+  if (pkgVersion !== m[1])
+    throw new Error(`package.json is ${pkgVersion} but AGENT_VERSION is ${m[1]} — bump both together on every release`);
+});
+
 check('REOON_API_KEY is never a real key in shared/Config.gs — it must stay empty', () => {
   const src = readFileSync('shared/Config.gs', 'utf8');
   const m = src.match(/const REOON_API_KEY\s*=\s*'([^']*)'/);

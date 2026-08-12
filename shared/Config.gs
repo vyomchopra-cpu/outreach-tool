@@ -85,7 +85,7 @@ const AGENT_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbxP0ae8lcMhVYJ
 const REOON_API_KEY = '';
 const REOON_MODE = 'quick';
 
-const AGENT_VERSION = '0.2.0';
+const AGENT_VERSION = '0.8.0'; // bump alongside package.json's version — see docs/RELEASE_PROCESS.md
 
 /**
  * Which send path the agent uses — see agent/Transport.gs.
