@@ -1,0 +1,90 @@
+<!--
+  Standalone entry point for a signed-in @REPLY_TO_DOMAIN user who has at
+  least one pending request naming them as approver, but isn't necessarily a
+  console admin themselves — a VP deciding a request shouldn't need prior
+  console access to do it. Reached from doGet (admin/Code.gs). Real top-level
+  template, not an include_()'d partial, so <?= ?> scriptlets run.
+-->
+<style>
+  :root { color-scheme: light dark; --bg:#fbfbfd; --ink:#15161a; --muted:#6b6f76; --line:#e4e6eb; --accent:#3b5bfd; --accent-soft:#eef1ff; --good:#12805c; --good-soft:#e6f6f0; --bad:#c02b3a; --bad-soft:#fdecee; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0f1115; --ink:#e9eaee; --muted:#9aa0aa; --line:#272b34; --accent:#7d92ff; --accent-soft:#1c2242; --good:#4ecf9a; --good-soft:#132a22; --bad:#ef6b7a; --bad-soft:#2e1a1e; } }
+  * { box-sizing: border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; background:var(--bg); color:var(--ink); margin:0; padding:32px 20px 80px; line-height:1.5; }
+  .wrap { max-width: 620px; margin: 0 auto; }
+  h1 { font-size: 19px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  .card { background: color-mix(in srgb, var(--bg) 92%, var(--ink) 4%); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; margin-bottom: 16px; }
+  .card h3 { font-size: 14.5px; margin: 0 0 2px; }
+  .card .meta { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
+  .card .reason { font-size: 13px; margin-top: 10px; padding: 10px 12px; background: var(--accent-soft); border-radius: 6px; }
+  .actions { margin-top: 14px; display: flex; gap: 10px; }
+  button { padding: 8px 16px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font-size: 13px; cursor: pointer; }
+  button.approve { background: var(--good); border-color: var(--good); color: #fff; }
+  button.deny { color: var(--bad); border-color: var(--bad); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .result { font-size: 12.5px; margin-top: 10px; white-space: pre-wrap; }
+  .result.good { color: var(--good); } .result.bad { color: var(--bad); }
+  .footer-link { margin-top: 28px; font-size: 13px; }
+</style>
+
+<div class="wrap">
+  <h1>Requests waiting for you — MIS Outreach</h1>
+  <div class="sub">Signed in as <strong><?= userEmail ?></strong>. Only you can decide these — that's the whole point of naming an approver.</div>
+
+  <div id="list"></div>
+
+  <div class="footer-link">Have a request of your own? <a href="?" id="ownLink">Submit one here</a> once you're done with these.</div>
+</div>
+
+<script>
+  function $(id) { return document.getElementById(id); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+  var pending = <?!= pendingJson ?>;
+
+  function render() {
+    if (!pending.length) {
+      $('list').innerHTML = '<div class="card">Nothing left to decide. Reload if you expect more.</div>';
+      return;
+    }
+    $('list').innerHTML = pending.map(function (r, i) {
+      return '<div class="card" id="req-' + i + '">'
+        + '<h3>' + esc(r.requestedBy) + '</h3>'
+        + '<div class="meta">' + esc(r.kind) + ' access · ' + r.days + ' day(s) · requested ' + (r.createdAt ? new Date(r.createdAt).toLocaleString() : '') + '</div>'
+        + (r.reason ? '<div class="reason">' + esc(r.reason) + '</div>' : '')
+        + '<div class="actions">'
+        + '<button class="approve" data-i="' + i + '" data-approve="1">Approve</button>'
+        + '<button class="deny" data-i="' + i + '" data-approve="0">Deny</button>'
+        + '</div>'
+        + '<div class="result" id="result-' + i + '"></div>'
+        + '</div>';
+    }).join('');
+
+    document.querySelectorAll('button[data-i]').forEach(function (btn) {
+      btn.onclick = function () { decide(Number(btn.dataset.i), btn.dataset.approve === '1'); };
+    });
+  }
+  render();
+
+  function decide(i, approve) {
+    const req = pending[i];
+    const card = $('req-' + i);
+    card.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+    const result = $('result-' + i);
+    result.textContent = 'Working…'; result.className = 'result';
+
+    google.script.run.withSuccessHandler(function (r) {
+      result.className = 'result good';
+      result.textContent = approve
+        ? ('Approved — ' + req.requestedBy + ' now has ' + req.days + ' day(s) of ' + req.kind + ' access, granted by you.')
+        : 'Denied. Nothing changed for them.';
+    }).withFailureHandler(function (err) {
+      result.className = 'result bad';
+      result.textContent = 'Error: ' + err.message;
+      card.querySelectorAll('button').forEach(function (b) { b.disabled = false; });
+    }).decideAccessRequest(req.id, approve, '');
+  }
+  // "Submit one here" is a plain reload (href="?") — once every pending
+  // decision here is resolved, doGet's own routing naturally falls through
+  // to the request form on the next load. No client-side logic needed.
+</script>

@@ -65,6 +65,9 @@ const CENTRAL_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbyLM5Wyr9S_i
  */
 const AGENT_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbxP0ae8lcMhVYJg4dp5VeSYZAr7_benBZ3zF4CTTFGTyZAA2RhkwD9u-9epCZpGmqkt/exec';
 
+/** The admin console's own URL — used by admin/Requests.gs to link a Chat notification straight to the decision page. */
+const ADMIN_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbzkVMxLpWszLRqL9ec9M3LNI0wRUtTAwadZ6eEoHxoQWuia_B6XEiObHlT5Smq3bsY/exec';
+
 /**
  * Reoon Email Verifier (emailverifier.reoon.com) — hard checks on recipient
  * addresses before send: syntax, disposable-domain, role-account, and MX
@@ -85,7 +88,7 @@ const AGENT_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbxP0ae8lcMhVYJ
 const REOON_API_KEY = '';
 const REOON_MODE = 'quick';
 
-const AGENT_VERSION = '0.8.0'; // bump alongside package.json's version — see docs/RELEASE_PROCESS.md
+const AGENT_VERSION = '0.11.0'; // bump alongside package.json's version — see docs/RELEASE_PROCESS.md
 
 /**
  * Which send path the agent uses — see agent/Transport.gs.

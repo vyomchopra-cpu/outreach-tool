@@ -24,7 +24,8 @@ Column order below is authoritative — `Store.gs` bootstraps headers from it an
 | `secret_hash` | string | SHA-256 of the onboarding shared secret. Never the secret itself. |
 | `consent_recorded_at` | datetime | See `docs/EXEC_CONSENT.md` |
 | `capabilities` | json | Reported by the agent every heartbeat: transport in use, whether the Gmail API (and so reply detection) is reachable, remaining provider quota. Makes a degraded agent visible instead of inferred from missing `Signals` rows. |
-| `sends_expire_at` | datetime? | Blank = permanent (default). Set/extended by an admin only (`admin/Access.gs` `setSenderExpiry`) — never self-declared at registration, since `gateway/` is `ANYONE_ANONYMOUS`. Checked live on every `pollDueJobs`/`heartbeat`, not cached. |
+| `sends_expire_at` | datetime? | Blank = permanent (default). Set/extended by an admin only (`admin/Access.gs` `setSenderExpiry`), or by a named approver deciding an `AccessRequests` row (`admin/Requests.gs` `decideAccessRequest`) — never self-declared at registration, since `gateway/` is `ANYONE_ANONYMOUS`. Checked live on every `pollDueJobs`/`heartbeat`, not cached. |
+| `sends_granted_by` | string | Whoever's authenticated action actually set `sends_expire_at` — the admin for a direct grant, or the named approver for a request/approval grant. Cleared alongside `sends_expire_at` when made permanent. |
 
 ## `Campaigns`
 
@@ -150,3 +151,23 @@ tab goes through (`Store.gs`); nothing else may call `SpreadsheetApp` directly.
 | `detector` | string | Which check fired — `kill_switch_on`, `stale_senders`, `queue_backlog`, `bounce_rate`, `unverified_risk`, `gcp_available` |
 | `summary` / `detail` | string | Detail always names the specific next action, not just the symptom |
 | `notified` | string | `chat` · `no channel configured` · `suppressed (cooldown)` |
+
+## `AccessRequests`
+
+Request → approval, not self-service self-grant — see `admin/Requests.gs`'s
+header comment for the gap this closes. The requester names an approver; only
+that approver's own authenticated sign-in can decide the row. Reachable via
+`doGet` without prior console access, in both directions — neither the
+requester nor the approver needs to already be a trusted admin.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | string | Primary key. `req_` + short UUID. |
+| `requested_by` | string | The signed-in requester — never client-supplied |
+| `approver_email` | string | Must be `@REPLY_TO_DOMAIN`, and must not equal `requested_by` |
+| `kind` | enum | `console` (→ `AccessGrants`) · `sending` (→ `Senders.sends_expire_at`) |
+| `days_requested` | int | 1–365, same bound as a direct grant |
+| `reason` | string | Free text, shown to the approver |
+| `status` | enum | `pending` · `approved` · `denied` |
+| `created_at` | datetime | |
+| `decided_by` / `decided_at` | | `decided_by` is the approver's own authenticated email, not a typed-in name |

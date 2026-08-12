@@ -108,6 +108,7 @@ function senderStatus() {
       providerQuota: caps.providerQuota == null ? 'unknown' : caps.providerQuota,
       sendsExpireAt: s.sends_expire_at || null,
       sendsExpired: sendsExpired,
+      sendsGrantedBy: s.sends_granted_by || null,
       sendsDaysLeft: (!sendsExpired && s.sends_expire_at)
         ? Math.ceil((new Date(s.sends_expire_at) - now) / 86400000) : null,
     };

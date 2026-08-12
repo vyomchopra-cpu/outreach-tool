@@ -8,7 +8,7 @@ const SHEET_ID = '1pw_BtBwaHOvAWIq66HvB81OfkMP_9rVRWK7Y3OiSjRc';
 const SCHEMA = {
   Senders: ['email', 'display_name', 'status', 'ramp_start_date', 'daily_cap_override',
     'timezone', 'agent_version', 'last_heartbeat', 'secret_hash', 'consent_recorded_at',
-    'capabilities', 'sends_expire_at'],
+    'capabilities', 'sends_expire_at', 'sends_granted_by'],
   Campaigns: ['id', 'name', 'status', 'subject', 'preheader', 'body_source', 'sender_pool',
     'tz_mode', 'send_window', 'interval_minutes', 'created_by', 'created_at',
     'exec_approved_by', 'exec_approved_at', 'seed_passed_at', 'canary_released_at',
@@ -32,6 +32,12 @@ const SCHEMA = {
   AccessGrants: ['email', 'display_name', 'granted_by', 'granted_at', 'expires_at', 'revoked', 'note'],
   // Append-only detector output — see admin/Monitor.gs.
   Incidents: ['ts', 'severity', 'detector', 'summary', 'detail', 'notified'],
+  // A request/approval flow, not a self-service grant — see admin/Requests.gs.
+  // The requester NAMES an approver; only that person, authenticated as
+  // themselves, can decide it. Nobody can grant themselves access and just
+  // write "VP approved this" in a note — the VP has to actually click Approve.
+  AccessRequests: ['id', 'requested_by', 'approver_email', 'kind', 'days_requested',
+    'reason', 'status', 'created_at', 'decided_by', 'decided_at'],
 };
 
 /** Bootstraps any missing tab with its header row. Idempotent — safe to call every deploy. */
@@ -60,6 +66,7 @@ const PRIMARY_KEY = {
   Control: 'key',
   AccessGrants: 'email',
   Incidents: null,
+  AccessRequests: 'id',
 };
 
 /** Global kill switch, checked by the agent every tick before it does anything else. */

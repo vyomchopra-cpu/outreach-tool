@@ -181,12 +181,34 @@ check('time-boxed sending access is admin-controlled, never self-declared by the
   if (!/heartbeat[\s\S]*?senderSendingExpired_/.test(src)) throw new Error('heartbeat does not derive expired status for the agent to see');
 });
 
-check('setSenderExpiry validates the day range and clears cleanly with a blank value', () => {
+check('applySenderExpiry_ validates the day range and clears cleanly with a blank value', () => {
+  // The actual write logic (setSenderExpiry delegates to it, and so does the
+  // request-approval path in admin/Requests.gs) — see admin/Access.gs's
+  // header comment for why the write is split from the two ways to reach it.
   const src = readFileSync('admin/Access.gs', 'utf8');
-  const fn = src.match(/function setSenderExpiry[\s\S]*?\n\}/);
-  if (!fn) throw new Error('setSenderExpiry not found');
+  const fn = src.match(/function applySenderExpiry_[\s\S]*?\n\}/);
+  if (!fn) throw new Error('applySenderExpiry_ not found');
   if (!/n < 1 \|\| n > 365/.test(fn[0])) throw new Error('day range is not bounded 1-365');
   if (!/sends_expire_at: ''/.test(fn[0])) throw new Error('a blank days value does not clear the expiry');
+});
+
+check('request/approval: only the named approver can decide, never the requester, never a bystander admin', () => {
+  const src = readFileSync('admin/Requests.gs', 'utf8');
+  if (!/requireRequestApprover_/.test(src)) throw new Error('decideAccessRequest has no per-request approver check');
+  const guard = src.match(/function requireRequestApprover_[\s\S]*?\n\}/);
+  if (!guard || !/approver_email/.test(guard[0]))
+    throw new Error('the approver check does not compare against the request\'s own approver_email — it would accept any admin instead of specifically the named approver');
+  if (!/approver === requester/.test(src)) throw new Error('requestAccess does not block naming yourself as your own approver');
+});
+
+check('a request is applied before being marked approved, so a failed grant cannot leave a stuck "approved" row', () => {
+  const src = readFileSync('admin/Requests.gs', 'utf8');
+  const fn = src.match(/function decideAccessRequest[\s\S]*?\n\}/);
+  if (!fn) throw new Error('decideAccessRequest not found');
+  const applyIdx = fn[0].search(/applyAccessGrant_|applySenderExpiry_/);
+  const statusIdx = fn[0].indexOf("status: approve ? 'approved'");
+  if (applyIdx === -1 || statusIdx === -1 || applyIdx > statusIdx)
+    throw new Error('the grant is applied after the status write, not before — a mid-flight failure would leave the request stuck "approved" with nothing actually granted');
 });
 
 check('only admin/Store.gs (and its synced copy) may reference SpreadsheetApp', () => {
@@ -373,13 +395,30 @@ check('every public admin function (no trailing _) calls requireAdmin_(), except
   // code runs; approveCampaignAsExec is intentionally exec-gated, not admin-gated.
   // The sender-facing API (AgentApi.gs) lives entirely in gateway/ now, not
   // here — it's checked separately, by requireSender_(), not requireAdmin_().
-  const EXEMPT = new Set(['doGet', 'approveCampaignAsExec']);
+  //
+  // requestAccess/listMyRequests and listPendingRequestsForMe/decideAccessRequest
+  // (admin/Requests.gs) are the whole point of the request/approval flow being
+  // reachable WITHOUT prior admin access — see that file's header comment. They
+  // are gated instead by requireDomainUser_() (any @domain sign-in) or, for
+  // decideAccessRequest, requireRequestApprover_() (must literally be the email
+  // the request names as approver). Exempting them from requireAdmin_() here is
+  // correct; the assertion below instead pins that they still call ONE of those
+  // narrower guards, so this isn't a silent "no auth at all" exemption.
+  const EXEMPT = new Set(['doGet', 'approveCampaignAsExec',
+    'requestAccess', 'listMyRequests', 'listPendingRequestsForMe', 'decideAccessRequest']);
+  const REQUEST_FLOW_GUARDS = new Set(['requestAccess', 'listMyRequests', 'listPendingRequestsForMe', 'decideAccessRequest']);
   const adminFiles = readdirSync('admin').filter(f => f.endsWith('.gs'));
   const src = adminFiles.map(f => readFileSync(`admin/${f}`, 'utf8')).join('\n');
   const fns = extractFunctions_(src);
   const unguarded = fns.filter(f =>
     !f.name.endsWith('_') && !EXEMPT.has(f.name) && !f.body.includes('requireAdmin_('));
   if (unguarded.length) throw new Error('missing requireAdmin_() in: ' + unguarded.map(f => f.name).join(', '));
+
+  const looselyGuarded = fns.filter(f => REQUEST_FLOW_GUARDS.has(f.name)
+    && !f.body.includes('requireDomainUser_(') && !f.body.includes('requireRequestApprover_('));
+  if (looselyGuarded.length)
+    throw new Error('exempted from requireAdmin_() but calls neither requireDomainUser_() nor requireRequestApprover_() in: '
+      + looselyGuarded.map(f => f.name).join(', '));
 });
 
 check('every function in gateway/AgentApi.gs is sender-gated by requireSender_(), except registerSender', () => {

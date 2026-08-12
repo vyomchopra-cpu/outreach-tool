@@ -18,10 +18,23 @@
 
 function doGet(e) {
   const email = Session.getActiveUser().getEmail();
+
   if (!isAuthorizedAdmin_(email)) {
+    // Not a full admin — but a signed-in @REPLY_TO_DOMAIN user isn't turned
+    // away with a dead end. Two things they might legitimately be here for,
+    // neither of which requires prior console access: deciding a request
+    // someone named them approver on, or making one of their own. See
+    // admin/Requests.gs's header comment for why this whole flow exists.
+    if (email && email.toLowerCase().endsWith('@' + REPLY_TO_DOMAIN)) {
+      const pending = listPendingRequestsForApprover_(email.toLowerCase());
+      const template = HtmlService.createTemplateFromFile(pending.length ? 'ui/DecideRequests' : 'ui/RequestAccess');
+      template.userEmail = email;
+      if (pending.length) template.pendingJson = JSON.stringify(pending);
+      return template.evaluate().setTitle('MIS Outreach')
+        .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+    }
     return HtmlService.createHtmlOutput(
-      '<p>Not authorized. This console is restricted to a named admin allowlist. ' +
-      'Contact an existing admin to be added to ADMIN_ALLOWLIST.</p>'
+      '<p>Not authorized. This console is restricted to moveinsync.com accounts.</p>'
     );
   }
 

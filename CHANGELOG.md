@@ -12,6 +12,19 @@ belongs in the commit message and the file it touched, not here.
 
 ---
 
+## [0.11.0] — 2026-08-13
+
+### Added
+- **Request → approval access flow.** Instead of any current admin granting
+  themselves or a colleague access with just a free-text note, you can now
+  request console or sending access *from* a named person — a VP, say —
+  and nothing is granted until they sign in themselves and approve it. They
+  get their own minimal decision page, reachable without needing console
+  access first; you get a live status list of what you've asked for and
+  from whom. Reachable from the Access tab ("Request access from someone
+  else") if you're already an admin, or directly at the console URL if
+  you're not.
+
 ## [0.8.0] — 2026-08-13
 
 ### Added

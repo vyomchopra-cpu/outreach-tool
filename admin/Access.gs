@@ -6,9 +6,20 @@
  *
  * ADMIN_ALLOWLIST stays as the permanent list (people who should always have
  * access, code-reviewed like everything else in shared/Config.gs).
- * AccessGrants is the temporary list: anyone already on the console can grant
- * someone else N days of the exact same access, tracked, visibly expiring,
- * and revocable in one click. isAuthorizedAdmin_ (admin/Code.gs) checks both.
+ * AccessGrants is the temporary list: an admin — OR the specific person named
+ * as approver on a request (admin/Requests.gs) — can grant someone N days of
+ * the exact same access, tracked, visibly expiring, and revocable in one
+ * click. isAuthorizedAdmin_ (admin/Code.gs) checks both AccessGrants and
+ * ADMIN_ALLOWLIST.
+ *
+ * The write logic (applyAccessGrant_, applySenderExpiry_) is split from the
+ * public entry points on purpose: grantAccess/setSenderExpiry are for an
+ * already-authorized admin acting directly, while admin/Requests.gs's
+ * decideAccessRequest needs the SAME write but authorized a different way —
+ * by being the specific person a request names as approver, who may not be
+ * an admin themselves (that's the whole point: a VP approving a request
+ * shouldn't need to already be a console admin to do it). One write path,
+ * two legitimate ways to reach it, each with its own real guard.
  *
  * A grant is full admin access for its duration — it can build and launch
  * campaigns, not just view the dashboard. There is no read-only tier yet;
@@ -23,15 +34,8 @@ function isAccessGrantValid_(email) {
   return new Date(row.expires_at) > new Date();
 }
 
-/**
- * Grants `days` of console access to `email`. Restricted to REPLY_TO_DOMAIN —
- * this console is an internal moveinsync.com tool, and the domain check
- * elsewhere in the codebase (isAuthorizedAdmin_ itself) would reject an
- * external address anyway; failing here gives a clear reason instead of a
- * silent no-op grant nobody can use.
- */
-function grantAccess(email, days, note) {
-  const admin = requireAdmin_();
+/** The actual write. `actor` is whoever is authorized to be granting this — checked by the caller, not here. */
+function applyAccessGrant_(email, days, note, actor) {
   const clean = String(email || '').toLowerCase().trim();
   if (!isValidEmail_(clean)) throw new Error('Not a valid email: ' + email);
   if (!clean.endsWith('@' + REPLY_TO_DOMAIN)) throw new Error('This console is internal-only — ' + clean + ' is not a @' + REPLY_TO_DOMAIN + ' address');
@@ -43,14 +47,20 @@ function grantAccess(email, days, note) {
   upsertRow_('AccessGrants', {
     email: clean,
     display_name: clean.split('@')[0],
-    granted_by: admin,
+    granted_by: actor,
     granted_at: new Date(),
     expires_at: expiresAt,
     revoked: false,
     note: note || '',
   });
-  logEvent_(admin, 'admin_action', { detail: { action: 'grant_access', email: clean, days: n } });
+  logEvent_(actor, 'admin_action', { detail: { action: 'grant_access', email: clean, days: n } });
   return { email: clean, expiresAt: expiresAt.toISOString() };
+}
+
+/** Direct path — an already-authorized admin granting access themselves. */
+function grantAccess(email, days, note) {
+  const admin = requireAdmin_();
+  return applyAccessGrant_(email, days, note, admin);
 }
 
 /** Immediate — the next request from that email fails auth, no waiting for expiry. */
@@ -66,7 +76,7 @@ function revokeAccess(email) {
  * sender authorizes their own agent exactly once (a real Google OAuth
  * consent screen — no way around that, and no reason to want one, since it's
  * the whole reason this architecture never holds anyone's credentials). What
- * this controls is how many days an admin allows that authorization to keep
+ * this controls is how many days that authorization is allowed to keep
  * actually sending; gateway/AgentApi.gs's pollDueJobs and heartbeat check it
  * on every poll, not just at registration.
  *
@@ -75,24 +85,29 @@ function revokeAccess(email) {
  * whatever the previous expiry was — calling this twice with 7 gives 7 more
  * days from the moment of the second call, not 14 from the first.
  */
-function setSenderExpiry(email, days) {
-  const admin = requireAdmin_();
+function applySenderExpiry_(email, days, actor) {
   const clean = String(email || '').toLowerCase().trim();
   const sender = findRow_('Senders', clean);
   if (!sender) throw new Error('No such sender: ' + email + ' — they need to onboard first');
 
   if (days === '' || days === null || days === undefined) {
-    updateRow_('Senders', clean, { sends_expire_at: '' });
-    logEvent_(admin, 'admin_action', { senderEmail: clean, detail: { action: 'sender_expiry_cleared' } });
+    updateRow_('Senders', clean, { sends_expire_at: '', sends_granted_by: '' });
+    logEvent_(actor, 'admin_action', { senderEmail: clean, detail: { action: 'sender_expiry_cleared' } });
     return { email: clean, expiresAt: null };
   }
 
   const n = Math.floor(Number(days));
   if (!isFinite(n) || n < 1 || n > 365) throw new Error('Days must be a whole number between 1 and 365, or blank for permanent');
   const expiresAt = new Date(Date.now() + n * 24 * 60 * 60 * 1000);
-  updateRow_('Senders', clean, { sends_expire_at: expiresAt });
-  logEvent_(admin, 'admin_action', { senderEmail: clean, detail: { action: 'sender_expiry_set', days: n } });
+  updateRow_('Senders', clean, { sends_expire_at: expiresAt, sends_granted_by: actor });
+  logEvent_(actor, 'admin_action', { senderEmail: clean, detail: { action: 'sender_expiry_set', days: n } });
   return { email: clean, expiresAt: expiresAt.toISOString() };
+}
+
+/** Direct path — an already-authorized admin setting sending expiry themselves. */
+function setSenderExpiry(email, days) {
+  const admin = requireAdmin_();
+  return applySenderExpiry_(email, days, admin);
 }
 
 /** The dashboard + track view — every grant ever issued, current status, who issued it. */

@@ -5,6 +5,42 @@
   there is nothing to configure for it. What this panel controls is whether
   their sign-in is then authorized, and for how long.
 -->
+<div class="card" id="pendingApprovalsCard" style="display:none">
+  <h2><span class="num">🔔</span> Waiting for your decision</h2>
+  <div class="hint">Someone named you as approver on a request. Only your own sign-in can act on these — that's what makes them trustworthy.</div>
+  <div id="pendingApprovalsList" style="margin-top:10px"></div>
+</div>
+
+<div class="card">
+  <h2><span class="num">✎</span> Request access from someone else</h2>
+  <div class="hint">
+    Rather than granting yourself something and writing "approved by X" in a
+    note, ask the actual person — they get their own decision link, and
+    nothing is granted until they act on it themselves.
+  </div>
+  <div class="cols">
+    <div>
+      <label>What</label>
+      <select id="reqKind">
+        <option value="console">Console access</option>
+        <option value="sending">Sending access (my own name)</option>
+      </select>
+      <label>Approve by</label>
+      <input type="text" id="reqApprover" placeholder="their.email@moveinsync.com">
+      <label>Days</label>
+      <input type="number" id="reqDays" min="1" max="365" value="14">
+      <label>Reason</label>
+      <input type="text" id="reqReason" placeholder="Covering the outreach launch this week">
+      <button id="btnSubmitRequest" class="secondary">Submit request</button>
+      <div id="requestStatus" class="msg"></div>
+    </div>
+    <div>
+      <label>Your requests</label>
+      <div id="myRequestsList" class="hint">Loading…</div>
+    </div>
+  </div>
+</div>
+
 <div class="card">
   <h2><span class="num">⏱</span> Grant access</h2>
   <div class="hint">Full console access — build and launch campaigns, not just view — for a fixed number of days. Internal @<span id="replyToDomainSpan">…</span> addresses only. They sign in at this same URL; nothing needs sending to them beyond the link.</div>

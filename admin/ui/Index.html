@@ -704,6 +704,51 @@
     }).withFailureHandler(fail('monitorStatus')).sendTestAlert();
   };
 
+  // ── requests: waiting for your decision, and your own ──────────
+  function refreshPendingApprovals() {
+    google.script.run.withSuccessHandler(function (rows) {
+      const card = $('pendingApprovalsCard');
+      if (!rows.length) { card.style.display = 'none'; return; }
+      card.style.display = '';
+      $('pendingApprovalsList').innerHTML = rows.map(function (r, i) {
+        return '<div class="row" id="pending-' + i + '"><span><strong>' + esc(r.requestedBy) + '</strong>'
+          + '<div class="hint">' + esc(r.kind) + ' · ' + r.days + 'd' + (r.reason ? ' · ' + esc(r.reason) : '') + '</div></span>'
+          + '<span style="display:flex;gap:8px">'
+          + '<button class="tiny" onclick="decidePending(\'' + esc(r.id) + '\', true, ' + i + ')">Approve</button>'
+          + '<button class="tiny secondary" onclick="decidePending(\'' + esc(r.id) + '\', false, ' + i + ')">Deny</button>'
+          + '</span></div>';
+      }).join('');
+    }).listPendingRequestsForMe();
+  }
+  window.decidePending = function (id, approve, i) {
+    google.script.run.withSuccessHandler(function () {
+      setMsg('grantStatus', approve ? 'Approved.' : 'Denied.', 'good');
+      refreshPendingApprovals(); refreshGrants(); refreshSendingAccess();
+    }).withFailureHandler(fail('grantStatus')).decideAccessRequest(id, approve, '');
+  };
+  refreshPendingApprovals();
+
+  function refreshMyRequests() {
+    google.script.run.withSuccessHandler(function (rows) {
+      $('myRequestsList').innerHTML = rows.length ? rows.map(function (r) {
+        const chip = r.status === 'approved' ? 'good' : r.status === 'denied' ? 'bad' : '';
+        return '<div class="row"><span>' + esc(r.kind) + ' · ' + r.days + 'd · ' + esc(r.approverEmail) + '</span>'
+          + '<span class="chip ' + chip + '">' + esc(r.status) + '</span></div>';
+      }).join('') : '<div class="hint">None yet.</div>';
+    }).listMyRequests();
+  }
+  refreshMyRequests();
+
+  $('btnSubmitRequest').onclick = function () {
+    const approver = $('reqApprover').value.trim();
+    if (!approver) { setMsg('requestStatus', 'Enter who should approve this.', 'bad'); return; }
+    google.script.run.withSuccessHandler(function () {
+      setMsg('requestStatus', 'Sent to ' + approver + '.', 'good');
+      $('reqApprover').value = ''; $('reqReason').value = '';
+      refreshMyRequests();
+    }).withFailureHandler(fail('requestStatus')).requestAccess($('reqKind').value, approver, $('reqDays').value, $('reqReason').value);
+  };
+
   // ── access grants ─────────────────────────────────────────────
   $('btnGrantAccess').onclick = function () {
     const email = $('grantEmail').value.trim();
