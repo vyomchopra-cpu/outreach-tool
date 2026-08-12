@@ -67,12 +67,20 @@ function doGet(e) {
  */
 function runSelfTestSend_() {
   const email = getMyEmail_();
+  // Every claim this message makes about merging must itself be a merge tag —
+  // an earlier version asserted "the company reads Example Corp" with the
+  // company name as literal text, which proved nothing about {{company}}.
   const body = '<p>Hi {{firstName}},</p>'
     + '<p>This is a test send from the MIS Outreach agent, rendered through the '
     + 'same merge and transport path a real campaign uses.</p>'
-    + '<p>If the greeting says <strong>Sam</strong> and the company reads '
-    + '<strong>Example Corp</strong>, merge tags work. If this arrived at all, '
-    + 'the send transport works.</p>'
+    + '<p>Merge check — every value below is substituted, none is hard-coded:</p>'
+    + '<ul>'
+    + '<li>First name: <strong>{{firstName}}</strong> (expected: Sam)</li>'
+    + '<li>Company: <strong>{{company}}</strong> (expected: Example Corp)</li>'
+    + '<li>Title: <strong>{{title}}</strong> (expected: VP Engineering)</li>'
+    + '</ul>'
+    + '<p>If those three read as expected, merge tags work. If this arrived at '
+    + 'all, the send transport works.</p>'
     + '<p style="color:#666;font-size:12px">Unsubscribe: {{unsubscribe}}</p>';
 
   const sampleRecipient = {

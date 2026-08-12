@@ -97,6 +97,27 @@ check('callCentral_ retries transport failures but never a structured rejection'
     throw new Error('callCentralRaw_ appears to retry structured rejections');
 });
 
+check('every render_/applyMerge_ call site supplies send-time extras', () => {
+  // {{unsubscribe}} is a blocking preflight requirement, so it appears in every
+  // real campaign body. A call site that forgets extras therefore hard-fails on
+  // every real campaign — which is exactly how preview and seed send silently
+  // broke once already. Cheap to pin, expensive to rediscover by hand.
+  const files = ['admin/Campaign.gs', 'admin/Preflight.gs', 'agent/Sender.gs', 'agent/Web.gs'];
+  const offenders = [];
+  files.forEach(function (f) {
+    stripComments_(readFileSync(f, 'utf8')).split('\n').forEach(function (line, i) {
+      // Two-argument render_(a, b) or single-argument mergeDataForRecipient_(a).
+      if (/\brender_\([^)]*,[^,)]*\)/.test(line) && !/render_\([^)]*,[^,)]*,/.test(line)) {
+        offenders.push(f + ':' + (i + 1) + ' render_ without extras');
+      }
+      if (/\bmergeDataForRecipient_\([^,)]*\)/.test(line)) {
+        offenders.push(f + ':' + (i + 1) + ' mergeDataForRecipient_ without extras');
+      }
+    });
+  });
+  if (offenders.length) throw new Error(offenders.join('; '));
+});
+
 check('seed queue rows are resolved everywhere they are read (they have no Recipients row)', () => {
   const src = readFileSync('gateway/AgentApi.gs', 'utf8');
   if (!/isSeedRecipientId_/.test(src)) throw new Error('no seed-row awareness — pollDueJobs would look a seed id up in Recipients, get null, and silently drop the send');

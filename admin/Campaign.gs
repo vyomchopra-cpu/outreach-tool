@@ -90,12 +90,15 @@ function previewCampaign(campaignId, sampleOverrides) {
   }, sampleOverrides || {});
 
   const tokensInBody = extractMergeTokens_(campaign.subject + ' ' + campaign.body_source);
+  // {{unsubscribe}} is supplied by the sending agent at send time; preview has
+  // no agent, so it derives the same address from the campaign's sender pool.
+  const extras = previewExtrasForSenderPool_(campaign.sender_pool);
 
   try {
-    const rendered = render_(campaign.body_source, sample);
+    const rendered = render_(campaign.body_source, sample, extras);
     return {
       ok: true,
-      subject: applyMerge_(campaign.subject, mergeDataForRecipient_(sample)),
+      subject: applyMerge_(campaign.subject, mergeDataForRecipient_(sample, extras)),
       html: rendered.html,
       text: rendered.text,
       bytes: rendered.bytes,
@@ -123,16 +126,21 @@ function enqueueSeedSend(campaignId) {
   const preview = previewCampaign(campaignId, {});
   if (!preview.ok) throw new Error('Cannot seed-send: ' + preview.error);
 
+  // Re-seeding after a body edit is the normal workflow, so the row id has to
+  // be unique per run: a stable id would collide on the second seed, and
+  // findRow_('Queue', id) then throws "Duplicate primary key" when the agent
+  // reports the send — breaking reporting for every subsequent seed.
+  const runTag = Utilities.getUuid().split('-')[0];
   SEED_MAILBOXES.forEach(function (seedEmail, i) {
     appendRow_('Queue', {
-      id: campaignId + '-seed-' + i,
+      id: campaignId + '-seed-' + runTag + '-' + i,
       campaign_id: campaignId,
       recipient_id: 'seed:' + seedEmail,
       sender_email: senderPool[0],
       due_at_utc: new Date(),
       status: 'pending',
       attempts: 0,
-      idempotency_key: campaignId + '-seed-' + i + '-' + new Date().toISOString(),
+      idempotency_key: campaignId + '-seed-' + runTag + '-' + i,
       sent_message_id: '',
       sent_at: '',
       error: '',

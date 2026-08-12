@@ -40,10 +40,10 @@ function runPreflight_(campaign) {
   }
 
   const sample = { first_name: 'Sam', last_name: 'Prospect', company: 'Example Corp', title: 'VP Engineering', custom: {} };
-  // {{unsubscribe}} is supplied by the sending agent, not the recipient row —
-  // preflight stands in a placeholder so the token resolves here the same way
-  // it will at send time.
-  const sampleExtras = { unsubscribe: 'sender+unsub@' + REPLY_TO_DOMAIN };
+  // {{unsubscribe}} is supplied by the sending agent, not the recipient row.
+  // Derived from the campaign's own sender pool so preflight validates against
+  // the address that will really be sent (same helper the preview uses).
+  const sampleExtras = previewExtrasForSenderPool_(campaign.sender_pool);
   let rendered = null;
   try {
     rendered = render_(campaign.body_source, sample, sampleExtras);

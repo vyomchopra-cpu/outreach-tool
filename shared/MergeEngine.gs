@@ -25,6 +25,22 @@ function mergeDataForRecipient_(recipient, extras) {
   return data;
 }
 
+/**
+ * Send-time extras for a preview or preflight, where no real sending agent
+ * exists to supply them. Derived from the campaign's first assigned sender so
+ * the preview shows the same opt-out address a recipient would actually
+ * receive, rather than a placeholder that hides a misconfiguration.
+ *
+ * Every caller of render_/applyMerge_ must supply extras from somewhere —
+ * {{unsubscribe}} is a blocking preflight requirement, so a call site that
+ * forgets them fails hard on every real campaign body. test/qa.mjs pins this.
+ */
+function previewExtrasForSenderPool_(senderPoolCsv) {
+  const first = String(senderPoolCsv || '').split(',').filter(Boolean)[0];
+  const localPart = first ? first.split('@')[0] : 'sender';
+  return { unsubscribe: localPart + '+unsub@' + REPLY_TO_DOMAIN };
+}
+
 /** Returns every {{token}} referenced in a source string, deduped, in first-seen order. */
 function extractMergeTokens_(source) {
   const seen = {};
