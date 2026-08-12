@@ -82,3 +82,28 @@ function getClientConfig() {
     allowMultiTouch: ALLOW_MULTI_TOUCH,
   };
 }
+
+/**
+ * Everything the page needs on first paint, in one round trip.
+ *
+ * Each google.script.run call pays a fixed Apps Script execution cost — a
+ * new sandboxed VM, not a lightweight HTTP handler — measured in the low
+ * hundreds of milliseconds regardless of how little work the function does.
+ * The original page fired getClientConfig, getKillSwitchStatus, and
+ * listCampaigns as three separate calls; the browser overlaps them, but each
+ * still pays its own overhead, so wall time is roughly the slowest of the
+ * three rather than free. One call pays that cost once.
+ *
+ * Kept alongside the individual functions (getClientConfig etc.) rather than
+ * replacing them — the Health and Launch tabs still call their own endpoints
+ * on demand, since bundling data nobody asked for yet into every load would
+ * be the same mistake in the other direction.
+ */
+function getBootstrap() {
+  requireAdmin_();
+  return {
+    config: getClientConfig(),
+    killSwitch: isKillSwitchOn_(),
+    campaigns: listCampaigns(),
+  };
+}

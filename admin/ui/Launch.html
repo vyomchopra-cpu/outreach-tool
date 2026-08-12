@@ -1,18 +1,29 @@
 <!-- Step 5. Included by ui/Index.html. -->
-<div class="step">
-  <h2><span class="num">5</span> Preflight &amp; launch</h2>
-  <div class="hint">Every non-advisory check must pass. The canary sends to the first 5 only, so a mistake costs 5 recipients rather than the whole list. All of these gates are enforced server-side — this page cannot skip them.</div>
+<div class="card">
+  <h2><span class="num">5</span> Readiness</h2>
+  <div class="hint">Every gate below is enforced server-side at launch — this only shows you where you are.</div>
+  <div class="rail" id="readinessRail"></div>
+  <button id="btnRefreshReadiness" class="secondary">Refresh</button>
+  <div id="launchReady" class="msg"></div>
+</div>
+
+<div class="card">
+  <h2><span class="num">✓</span> Preflight</h2>
+  <div class="hint"><strong>BLOCKED</strong> stops a launch. <strong>NOTE</strong> is advisory — worth reading, not fatal.</div>
   <button id="btnPreflight" class="secondary">Run preflight</button>
-  <div id="preflightResults" style="margin-top:8px"></div>
-  <div style="margin-top:14px">
-    <button id="btnApprove" class="secondary">Approve as exec (signed-in user)</button>
-    <button id="btnLaunchCanary">Launch canary (first 5)</button>
-    <button id="btnReleaseCanary" class="secondary">Release the rest</button>
-  </div>
+  <div id="preflightResults" style="margin-top:10px"></div>
+</div>
+
+<div class="card">
+  <h2><span class="num">→</span> Launch</h2>
+  <div class="hint">The canary sends to the first 5 only, so a mistake costs 5 recipients rather than the whole list. Review what actually arrived before releasing the rest.</div>
+  <button id="btnApprove" class="secondary">Approve as exec (signed-in user)</button>
+  <button id="btnLaunchCanary" disabled>Launch canary (first 5)</button>
+  <button id="btnReleaseCanary" class="secondary">Release the rest</button>
   <div id="launchStatus" class="msg"></div>
 </div>
 
-<div class="step">
+<div class="card">
   <h2><span class="num">≡</span> Campaigns</h2>
   <div id="campaignList"></div>
 </div>

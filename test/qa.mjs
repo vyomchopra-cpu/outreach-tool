@@ -118,6 +118,21 @@ check('every render_/applyMerge_ call site supplies send-time extras', () => {
   if (offenders.length) throw new Error(offenders.join('; '));
 });
 
+check('the client script is syntactically valid (a broken <script> block is a blank white page, not an error)', () => {
+  const html = readFileSync('admin/ui/Index.html', 'utf8');
+  const m = html.match(/<script>([\s\S]*)<\/script>/);
+  if (!m) throw new Error('no <script> block found in admin/ui/Index.html');
+  new Function(m[1]); // throws SyntaxError on anything invalid, including reassigning a const
+});
+
+check('first paint uses one combined round trip (getBootstrap), not three separate calls', () => {
+  const html = readFileSync('admin/ui/Index.html', 'utf8');
+  if (!/\.getBootstrap\(\)/.test(html))
+    throw new Error('getBootstrap() is not called — first paint regressed to separate getClientConfig/getKillSwitchStatus/listCampaigns round trips');
+  const src = readFileSync('admin/Code.gs', 'utf8');
+  if (!/function getBootstrap/.test(src)) throw new Error('getBootstrap not defined in admin/Code.gs');
+});
+
 check('every UI partial referenced by the shell exists (a missing include renders an error page)', () => {
   const shell = readFileSync('admin/ui/Index.html', 'utf8');
   const refs = [...shell.matchAll(/include_\('ui\/([A-Za-z]+)'\)/g)].map(m => m[1]);

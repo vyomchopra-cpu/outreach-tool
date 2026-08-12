@@ -95,12 +95,15 @@ function extractMergeTokens_(source) {
  */
 function applyMerge_(source, data, options) {
   const escape = !(options && options.escape === false);
-  const missing = [];
+  // Keyed, not a list: an unresolved {{{token}}} is left in place by the raw
+  // pass and then matched again by the escaped pass, so a plain array reported
+  // every missing raw token twice.
+  const missing = {};
 
   function resolve(token) {
     const value = data[token];
     if (value === undefined || value === null || String(value).trim() === '') {
-      missing.push(token);
+      missing[token] = true;
       return null;
     }
     return String(value);
@@ -117,8 +120,9 @@ function applyMerge_(source, data, options) {
     return escape ? escapeHtml_(value) : value;
   });
 
-  if (missing.length > 0) {
-    throw new Error('Missing merge value(s): ' + missing.join(', '));
+  const missingList = Object.keys(missing);
+  if (missingList.length > 0) {
+    throw new Error('Missing merge value(s): ' + missingList.join(', '));
   }
   return result;
 }

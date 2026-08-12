@@ -85,6 +85,51 @@ function getCampaign(campaignId) {
   return c;
 }
 
+/**
+ * Everything the console needs to render the readiness checklist, in one call.
+ * The point is that a blocked step should say *why* it is blocked — the
+ * earlier UI only greyed buttons out, which is indistinguishable from broken.
+ *
+ * Advisory in nature only: every gate here is separately and authoritatively
+ * enforced by assertLaunchGatesClear_ at launch time. This never decides
+ * anything, it only explains.
+ */
+function getCampaignReadiness(campaignId) {
+  requireAdmin_();
+  if (!campaignId) return { exists: false };
+  const c = findRow_('Campaigns', campaignId);
+  if (!c) return { exists: false };
+
+  const recipients = readRows_('Recipients', function (r) { return r.campaign_id === campaignId; });
+  const preflight = runPreflight_(c);
+  const seedAgeHours = c.seed_passed_at
+    ? (new Date() - new Date(c.seed_passed_at)) / 3600000
+    : null;
+  const seedFresh = seedAgeHours !== null && seedAgeHours <= GOVERNANCE.seedSendMaxAgeHours;
+
+  return {
+    exists: true,
+    id: c.id,
+    name: c.name,
+    status: c.status,
+    steps: [
+      { key: 'saved', done: true, label: 'Draft saved' },
+      { key: 'preflight', done: preflight.ok, label: 'Preflight passing',
+        hint: preflight.ok ? '' : preflight.checks.filter(function (x) { return !x.ok && x.blocking !== false; })
+          .map(function (x) { return x.name; }).join(', ') },
+      { key: 'seed', done: seedFresh, label: 'Test send confirmed',
+        hint: !c.seed_passed_at ? 'no seed pass recorded'
+          : (seedFresh ? Math.round(seedAgeHours) + 'h ago' : 'expired — re-send and confirm again') },
+      { key: 'recipients', done: recipients.length > 0, label: 'Recipients imported',
+        hint: recipients.length + ' imported' },
+      { key: 'approved', done: !!c.exec_approved_at, label: 'Exec approved',
+        hint: c.exec_approved_by || 'a named sender must approve' },
+    ],
+    canLaunch: preflight.ok && seedFresh && recipients.length > 0 && !!c.exec_approved_at,
+    recipientCount: recipients.length,
+  };
+}
+
 function listCampaigns() {
   requireAdmin_();
   return readRows_('Campaigns').sort(function (a, b) {

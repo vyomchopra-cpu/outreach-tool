@@ -1,87 +1,209 @@
 <!--
-  Shell: styles, tab nav, and all client logic. The tab bodies are separate
-  files (Compose/Audience/Launch/Health/Operations) included below; the script
-  stays here, after every include, so it can bind to the whole DOM in one pass
-  rather than each partial carrying its own fragment of state.
+  Shell: design tokens, tab nav, readiness rail, and all client logic. Tab
+  bodies are separate files included below; the script stays here, after every
+  include, so it binds the whole DOM in one pass instead of each partial
+  carrying a fragment of shared state.
 
-  Plain JS, no framework — this is a 2-3 admin internal tool, and
-  google.script.run is the only transport, so there is no second API to keep
-  in sync. Every gate this page shows is also enforced server-side: the UI
-  makes the order obvious, it does not enforce it.
+  Plain JS, no framework, no CDN — google.script.run is the only transport and
+  Apps Script serves this in a sandboxed iframe, so external assets are a
+  liability rather than a convenience. Every gate shown here is separately
+  enforced server-side: this makes the order legible, it does not police it.
 -->
 <style>
-  :root { color-scheme: light dark; --line:#8883; --muted:#888; --bad:#c0392b; --good:#1a7f37; --warn:#a67c00; }
-  body { font-family:-apple-system, Segoe UI, Arial, sans-serif; margin:0; padding:20px 24px 60px; max-width:1200px; line-height:1.45; }
-  h1 { font-size:19px; margin:0; }
-  .hint, .sub { color:var(--muted); font-size:12.5px; }
-  nav { display:flex; gap:4px; margin:14px 0 4px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
-  nav button { background:transparent; color:inherit; border:none; border-bottom:2px solid transparent;
-               padding:8px 14px; font-size:13px; cursor:pointer; margin:0; border-radius:0; }
-  nav button.active { border-bottom-color:currentColor; font-weight:600; }
-  .tab { display:none; } .tab.active { display:block; }
-  .step { border:1px solid var(--line); border-radius:8px; padding:16px 18px; margin-top:16px; }
-  .step > h2 { font-size:14px; margin:0 0 6px; display:flex; align-items:center; gap:8px; }
+  :root {
+    color-scheme: light dark;
+    --bg:#fbfbfd; --panel:#ffffff; --ink:#15161a; --muted:#6b6f76;
+    --line:#e4e6eb; --line-soft:#eef0f4;
+    --accent:#3b5bfd; --accent-soft:#eef1ff;
+    --good:#12805c; --good-soft:#e6f6f0;
+    --warn:#9a6b00; --warn-soft:#fdf3e0;
+    --bad:#c02b3a; --bad-soft:#fdecee;
+    --radius:12px;
+    --shadow:0 1px 2px rgba(16,18,26,.04), 0 4px 16px rgba(16,18,26,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#0f1115; --panel:#161920; --ink:#e9eaee; --muted:#9aa0aa;
+      --line:#272b34; --line-soft:#1e222a;
+      --accent:#7d92ff; --accent-soft:#1c2242;
+      --good:#4ecf9a; --good-soft:#132a22;
+      --warn:#e0aa4a; --warn-soft:#2c2415;
+      --bad:#ef6b7a;  --bad-soft:#2e1a1e;
+      --shadow:0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.25);
+    }
+  }
+  * { box-sizing:border-box; }
+  body {
+    font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Arial, sans-serif;
+    margin:0; padding:0 0 80px; background:var(--bg); color:var(--ink);
+    line-height:1.5; -webkit-font-smoothing:antialiased;
+  }
+  .wrap { max-width:1180px; margin:0 auto; padding:0 24px; }
+
+  header.top {
+    position:sticky; top:0; z-index:20; background:var(--bg);
+    border-bottom:1px solid var(--line); padding:14px 0 0;
+  }
+  .brand { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .brand h1 { font-size:16px; margin:0; letter-spacing:-.01em; }
+  .brand .who { font-size:12.5px; color:var(--muted); }
+  .spacer { flex:1; }
+
+  .chip { font-size:11.5px; padding:3px 10px; border-radius:999px; border:1px solid var(--line);
+          background:var(--panel); white-space:nowrap; display:inline-flex; align-items:center; gap:6px; }
+  .chip.good { color:var(--good); background:var(--good-soft); border-color:transparent; }
+  .chip.bad  { color:var(--bad);  background:var(--bad-soft);  border-color:transparent; }
+  .chip.warn { color:var(--warn); background:var(--warn-soft); border-color:transparent; }
+  .dot { width:7px; height:7px; border-radius:50%; background:currentColor; flex:none; }
+
+  nav { display:flex; gap:2px; margin-top:12px; flex-wrap:wrap; }
+  nav button {
+    background:transparent; color:var(--muted); border:none; border-bottom:2px solid transparent;
+    padding:9px 14px; font-size:13px; cursor:pointer; margin:0; border-radius:0;
+    font-weight:500; transition:color .15s, border-color .15s;
+  }
+  nav button:hover { color:var(--ink); }
+  nav button.active { color:var(--accent); border-bottom-color:var(--accent); }
+
+  .tab { display:none; animation:fade .18s ease; }
+  .tab.active { display:block; }
+  @keyframes fade { from { opacity:0; transform:translateY(3px); } to { opacity:1; transform:none; } }
+
+  .card {
+    background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+    padding:18px 20px; margin-top:16px; box-shadow:var(--shadow);
+  }
+  .card > h2 { font-size:13.5px; margin:0 0 4px; display:flex; align-items:center; gap:9px; letter-spacing:-.005em; }
   .num { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px;
-         border-radius:50%; background:#1a1a1a; color:#fff; font-size:12px; flex:none; }
-  .cols { display:grid; grid-template-columns:1fr 1fr; gap:20px; align-items:start; }
-  label { display:block; font-size:12px; font-weight:600; margin:12px 0 4px; }
+         border-radius:7px; background:var(--accent-soft); color:var(--accent); font-size:11.5px;
+         font-weight:600; flex:none; }
+  .hint, .sub { color:var(--muted); font-size:12.5px; }
+  .cols { display:grid; grid-template-columns:1fr 1fr; gap:22px; align-items:start; }
+  @media (max-width:860px) { .cols { grid-template-columns:1fr; } }
+
+  label { display:block; font-size:12px; font-weight:600; margin:14px 0 5px; }
   label .hint { font-weight:400; }
   input[type=text], input[type=number], textarea, select {
-    width:100%; box-sizing:border-box; padding:8px; font-size:13px; border:1px solid #8886;
-    border-radius:4px; font-family:inherit; background:transparent; color:inherit; }
-  textarea { min-height:180px; font-family:ui-monospace, Consolas, monospace; font-size:12px; }
-  button { padding:8px 14px; border-radius:4px; border:1px solid #8888; background:#1a1a1a; color:#fff;
-           font-size:13px; cursor:pointer; margin:8px 8px 0 0; }
-  button.secondary { background:transparent; color:inherit; }
-  button:disabled { opacity:.4; cursor:not-allowed; }
-  .senders label { display:inline-flex; align-items:center; gap:6px; font-weight:400; margin-right:16px; }
-  .tokens { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0; }
-  .token { font-size:11px; padding:2px 8px; border-radius:10px; background:#8883; }
-  .msg { font-size:12px; margin-top:6px; white-space:pre-wrap; }
-  .msg.bad { color:var(--bad); } .msg.good { color:var(--good); }
-  iframe.preview { width:100%; height:340px; border:1px solid var(--line); border-radius:4px; background:#fff; }
-  .row { padding:7px 0; border-bottom:1px solid var(--line); font-size:13px; display:flex; justify-content:space-between; gap:12px; }
-  .pill { font-size:11px; padding:2px 8px; border-radius:10px; background:#8883; white-space:nowrap; }
-  .drop { border:2px dashed #8886; border-radius:6px; padding:18px; text-align:center; font-size:13px; color:var(--muted); cursor:pointer; margin-top:10px; }
-  .drop.over { border-color:currentColor; }
-  table.mini { width:100%; border-collapse:collapse; font-size:11.5px; margin-top:8px; }
-  table.mini td, table.mini th { border:1px solid var(--line); padding:4px 6px; text-align:left;
-                                 max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .cards { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; }
-  .card { border:1px solid var(--line); border-radius:6px; padding:10px 14px; min-width:120px; }
-  .card b { display:block; font-size:20px; font-weight:600; }
-  .card span { font-size:11.5px; color:var(--muted); }
-  .bar { height:5px; border-radius:3px; background:#8883; overflow:hidden; margin-top:4px; }
-  .bar > i { display:block; height:100%; background:currentColor; }
-  code { background:#8882; padding:1px 4px; border-radius:3px; font-size:12px; }
+    width:100%; padding:9px 11px; font-size:13px; border:1px solid var(--line);
+    border-radius:8px; font-family:inherit; background:var(--bg); color:var(--ink);
+    transition:border-color .15s, box-shadow .15s;
+  }
+  input:focus, textarea:focus, select:focus {
+    outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft);
+  }
+  textarea { min-height:210px; font-family:ui-monospace, SFMono-Regular, Consolas, monospace; font-size:12px; line-height:1.55; }
+
+  button {
+    padding:9px 15px; border-radius:8px; border:1px solid var(--accent); background:var(--accent);
+    color:#fff; font-size:13px; font-weight:500; cursor:pointer; margin:10px 8px 0 0;
+    transition:filter .15s, opacity .15s;
+  }
+  button:hover:not(:disabled) { filter:brightness(1.08); }
+  button.secondary { background:var(--panel); color:var(--ink); border-color:var(--line); }
+  button.secondary:hover:not(:disabled) { border-color:var(--muted); filter:none; }
+  button.danger { background:var(--bad); border-color:var(--bad); }
+  button:disabled { opacity:.42; cursor:not-allowed; }
+  button.tiny { padding:3px 9px; font-size:11px; margin:0; }
+
+  .senders label { display:inline-flex; align-items:center; gap:7px; font-weight:400; margin:0 16px 0 0; }
+  .tokens { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0; }
+  .token { font-size:11px; padding:3px 9px; border-radius:6px; background:var(--accent-soft);
+           color:var(--accent); font-family:ui-monospace, Consolas, monospace; }
+  .msg { font-size:12.5px; margin-top:10px; white-space:pre-wrap; }
+  .msg.bad { color:var(--bad); } .msg.good { color:var(--good); } .msg.warn { color:var(--warn); }
+
+  iframe.preview { width:100%; height:400px; border:1px solid var(--line); border-radius:8px; background:#fff; }
+  .row { padding:10px 0; border-bottom:1px solid var(--line-soft); font-size:13px;
+         display:flex; justify-content:space-between; gap:14px; align-items:flex-start; }
+  .row:last-child { border-bottom:none; }
+
+  .drop { border:1.5px dashed var(--line); border-radius:10px; padding:26px; text-align:center;
+          font-size:13px; color:var(--muted); cursor:pointer; margin-top:12px; background:var(--bg);
+          transition:border-color .15s, background .15s; }
+  .drop:hover, .drop.over { border-color:var(--accent); background:var(--accent-soft); color:var(--accent); }
+
+  table.mini { width:100%; border-collapse:collapse; font-size:12px; margin-top:10px; }
+  table.mini th { background:var(--line-soft); font-weight:600; }
+  table.mini td, table.mini th { border:1px solid var(--line); padding:6px 9px; text-align:left;
+                                 max-width:230px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  .stats { display:grid; grid-template-columns:repeat(auto-fill, minmax(140px,1fr)); gap:12px; margin-top:14px; }
+  .stat { border:1px solid var(--line); border-radius:10px; padding:13px 15px; background:var(--bg); }
+  .stat b { display:block; font-size:22px; font-weight:600; letter-spacing:-.02em; }
+  .stat span { font-size:11.5px; color:var(--muted); }
+  .bar { height:6px; border-radius:99px; background:var(--line); overflow:hidden; margin-top:6px; }
+  .bar > i { display:block; height:100%; border-radius:99px; transition:width .4s ease; }
+
+  /* Readiness rail — the thing that makes a blocked step self-explanatory. */
+  .rail { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+  .rstep { display:flex; align-items:center; gap:8px; font-size:12px; padding:7px 12px;
+           border-radius:999px; border:1px solid var(--line); background:var(--bg); }
+  .rstep.done { color:var(--good); background:var(--good-soft); border-color:transparent; }
+  .rstep.todo { color:var(--muted); }
+  .rstep .mark { font-weight:700; }
+  .rstep em { font-style:normal; opacity:.75; font-size:11px; }
+
+  code { background:var(--line-soft); padding:1.5px 5px; border-radius:4px;
+         font-family:ui-monospace, Consolas, monospace; font-size:11.5px; }
+  a { color:var(--accent); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+  .empty { padding:22px; text-align:center; color:var(--muted); font-size:12.5px; }
+
+  /*
+   * Global progress bar. Apps Script has no way to make a round trip itself
+   * faster — each google.script.run call pays a fixed execution cost before
+   * any of our code runs — so the win available here is entirely about
+   * feedback latency: this must appear the instant a button is pressed, not
+   * once a response arrives. Click-delegated so it needs no per-button code
+   * and cannot be forgotten on a button added later.
+   */
+  #progressBar { position:fixed; top:0; left:0; height:2.5px; width:0%; z-index:100;
+    background:var(--accent); opacity:0; transition:width .3s ease, opacity .2s; pointer-events:none; }
+  #progressBar.on { opacity:1; width:70%; transition:width 2.5s cubic-bezier(.1,.6,.2,1); }
+  #progressBar.done { opacity:0; width:100%; transition:width .2s ease, opacity .3s ease .1s; }
+
+  /* Skeleton placeholders for first paint, before any data has arrived. */
+  .skel { background:linear-gradient(90deg, var(--line-soft) 25%, var(--line) 37%, var(--line-soft) 63%);
+    background-size:400% 100%; animation:shimmer 1.4s ease infinite; border-radius:6px; }
+  @keyframes shimmer { 0% { background-position:100% 0; } 100% { background-position:0 0; } }
 </style>
 
-<h1>MIS Outreach</h1>
-<div class="sub">
-  <span id="adminEmail"><?= adminEmail ?></span> ·
-  single-touch pilot · 09:00–17:00 business days ·
-  <span id="killSwitchState" class="pill">checking…</span>
-  <button id="btnToggleKill" class="secondary" style="padding:2px 8px;font-size:11px;margin:0 0 0 6px">toggle</button>
+<div id="progressBar"></div>
+<header class="top">
+  <div class="wrap">
+    <div class="brand">
+      <h1>MIS Outreach</h1>
+      <span class="who" id="adminEmail"><?= adminEmail ?></span>
+      <span class="spacer"></span>
+      <span class="chip" id="campaignChip" style="display:none"></span>
+      <span class="chip" id="killSwitchState"><span class="dot"></span>checking…</span>
+      <button id="btnToggleKill" class="secondary tiny">toggle</button>
+    </div>
+    <nav>
+      <button data-tab="compose" class="active">1 · Compose</button>
+      <button data-tab="audience">2 · Audience</button>
+      <button data-tab="launch">3 · Launch</button>
+      <button data-tab="health">Health</button>
+      <button data-tab="ops">Operations</button>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="tab active" id="tab-compose"><?!= include_('ui/Compose') ?></div>
+  <div class="tab" id="tab-audience"><?!= include_('ui/Audience') ?></div>
+  <div class="tab" id="tab-launch"><?!= include_('ui/Launch') ?></div>
+  <div class="tab" id="tab-health"><?!= include_('ui/Health') ?></div>
+  <div class="tab" id="tab-ops"><?!= include_('ui/Operations') ?></div>
 </div>
-
-<nav>
-  <button data-tab="compose" class="active">1 · Compose</button>
-  <button data-tab="audience">2 · Audience</button>
-  <button data-tab="launch">3 · Launch</button>
-  <button data-tab="health">Health</button>
-  <button data-tab="ops">Operations</button>
-</nav>
-
-<div class="tab active" id="tab-compose"><?!= include_('ui/Compose') ?></div>
-<div class="tab" id="tab-audience"><?!= include_('ui/Audience') ?></div>
-<div class="tab" id="tab-launch"><?!= include_('ui/Launch') ?></div>
-<div class="tab" id="tab-health"><?!= include_('ui/Health') ?></div>
-<div class="tab" id="tab-ops"><?!= include_('ui/Operations') ?></div>
 
 <script>
   let currentCampaignId = null;
   let pendingCsvText = null;
   let clientConfig = null;
+  let customSampleValues = {};
+
+  const STANDARD_TOKENS = ['firstName', 'lastName', 'company', 'title', 'unsubscribe'];
 
   const $ = function (id) { return document.getElementById(id); };
   const esc = function (s) {
@@ -89,11 +211,36 @@
       return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c];
     });
   };
-  const setMsg = function (id, text, cls) {
+  // Apps Script wraps thrown errors so messages often already begin "Error:".
+  const clean = function (m) { return String(m || '').replace(/^Error:\s*/, ''); };
+  let setMsg = function (id, text, cls) {
     const el = $(id); if (!el) return;
-    el.textContent = text; el.className = 'msg' + (cls ? ' ' + cls : '');
+    el.textContent = clean(text); el.className = 'msg' + (cls ? ' ' + cls : '');
   };
-  const fail = function (id) { return function (err) { setMsg(id, 'Error: ' + err.message, 'bad'); }; };
+  const fail = function (id) { return function (err) { hideBar(); setMsg(id, clean(err.message), 'bad'); }; };
+
+  // ── progress bar ──────────────────────────────────────────────
+  // Fires the instant a button is pressed — before the round trip starts —
+  // because that instant is the only latency this page can actually erase.
+  // Any success/failure path that calls setMsg (nearly all of them) clears it
+  // for free; the few that don't call hideBar() explicitly. A 6s safety net
+  // covers anything that falls through both.
+  const progressBar = $('progressBar');
+  let barTimer = null;
+  function showBar() {
+    progressBar.classList.remove('done'); void progressBar.offsetWidth; progressBar.classList.add('on');
+    clearTimeout(barTimer); barTimer = setTimeout(hideBar, 6000);
+  }
+  function hideBar() {
+    clearTimeout(barTimer);
+    progressBar.classList.remove('on'); progressBar.classList.add('done');
+  }
+  document.addEventListener('click', function (e) {
+    const btn = e.target.closest('button');
+    if (btn && !btn.disabled) showBar();
+  });
+  const oldSetMsg = setMsg;
+  setMsg = function (id, text, cls) { hideBar(); oldSetMsg(id, text, cls); };
 
   // ── tabs ──────────────────────────────────────────────────────
   document.querySelectorAll('nav button').forEach(function (b) {
@@ -103,11 +250,15 @@
       b.classList.add('active');
       $('tab-' + b.dataset.tab).classList.add('active');
       if (b.dataset.tab === 'health') refreshHealth();
+      if (b.dataset.tab === 'launch') refreshReadiness();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     };
   });
 
   // ── config ────────────────────────────────────────────────────
-  google.script.run.withSuccessHandler(function (cfg) {
+  function row2(k, v) { return '<tr><th style="width:170px">' + esc(k) + '</th><td style="white-space:normal">' + esc(v) + '</td></tr>'; }
+
+  function applyClientConfig(cfg) {
     clientConfig = cfg;
     $('senders').innerHTML = cfg.senderPool.length
       ? cfg.senderPool.map(function (s) {
@@ -118,11 +269,11 @@
 
     const u = cfg.agentWebAppUrl;
     $('agentLinks').innerHTML = u ? ''
-      + '<p><a href="' + u + '?diagnose=1" target="_blank">Diagnostics</a> — probe every capability; check this first when anything is odd</p>'
-      + '<p><a href="' + u + '?testsend=1" target="_blank">Send myself a test</a> — proves the real send path end to end</p>'
-      + '<p><a href="' + u + '?setup=1" target="_blank">Manual filter setup</a> — the Gmail filters that sort replies</p>'
-      + '<p><a href="' + u + '?onboard=1" target="_blank">Onboard / re-onboard</a> — register, and (re)create the send trigger</p>'
-      + '<p><a href="' + u + '?disconnect=1" target="_blank">Pause sending</a> — removes the trigger immediately</p>'
+      + '<div class="row"><span><strong>Diagnostics</strong><div class="hint">Probe every capability — check this first when anything is odd</div></span><a href="' + u + '?diagnose=1" target="_blank">open →</a></div>'
+      + '<div class="row"><span><strong>Send myself a test</strong><div class="hint">Proves the real send path end to end</div></span><a href="' + u + '?testsend=1" target="_blank">open →</a></div>'
+      + '<div class="row"><span><strong>Manual filter setup</strong><div class="hint">The Gmail filters that sort replies</div></span><a href="' + u + '?setup=1" target="_blank">open →</a></div>'
+      + '<div class="row"><span><strong>Onboard / re-onboard</strong><div class="hint">Register and (re)create the send trigger</div></span><a href="' + u + '?onboard=1" target="_blank">open →</a></div>'
+      + '<div class="row"><span><strong>Pause sending</strong><div class="hint">Removes the trigger immediately</div></span><a href="' + u + '?disconnect=1" target="_blank">open →</a></div>'
       : '<span class="hint">AGENT_WEBAPP_URL is not set in shared/Config.gs.</span>';
 
     $('rulesTable').innerHTML = '<table class="mini">'
@@ -130,12 +281,10 @@
       + row2('Daily cap ramp', cfg.dailyCapRamp.map(function (t) { return 'day ' + t.afterDays + '+ → ' + t.cap; }).join(' · '))
       + row2('Agent poll', 'every ' + cfg.pollMinutes + ' min (limits how precise a send gap can be)')
       + row2('Seed mailboxes', cfg.seedMailboxes.length ? cfg.seedMailboxes.join(', ') : '(none configured)')
-      + row2('Multi-touch sequences', cfg.allowMultiTouch ? 'allowed' : 'disabled — single-touch only while reply detection is unavailable')
+      + row2('Multi-touch', cfg.allowMultiTouch ? 'allowed' : 'disabled — single-touch only while reply detection is unavailable')
       + row2('Max HTML size', cfg.maxHtmlBytes + ' bytes before Gmail clips')
       + '</table>';
-  }).getClientConfig();
-
-  function row2(k, v) { return '<tr><th>' + esc(k) + '</th><td style="white-space:normal">' + esc(v) + '</td></tr>'; }
+  }
 
   const selectedSenders = function () {
     return Array.from(document.querySelectorAll('#senders input:checked')).map(function (c) { return c.value; });
@@ -149,28 +298,33 @@
   };
 
   // ── compose ───────────────────────────────────────────────────
+  // The sample deliberately uses only tokens the default preview can resolve.
+  // An earlier version referenced a CSV-only column, so the first Preview click
+  // always failed and looked like a broken button rather than a missing value.
   $('btnLoadSample').onclick = function () {
-    $('subject').value = $('subject').value || 'Quick question, {{firstName}}';
-    $('preheader').value = $('preheader').value || '{{company}} — a quick thought';
+    $('name').value = $('name').value || 'Pilot test campaign';
+    $('subject').value = 'Quick question, {{firstName}}';
+    $('preheader').value = '{{company}} — a quick thought';
     $('bodySource').value =
       '<p>Hi {{firstName}},</p>\n' +
-      '<p>I noticed {{company}} is {{{intro_html}}} — most {{title}}s we speak to\n' +
-      'hit the same commute-cost question about then.</p>\n' +
+      '<p>I noticed {{company}} is growing — most {{title}}s we speak to hit the\n' +
+      'same commute-cost question about then.</p>\n' +
       '<p>Worth a short conversation?</p>\n' +
       '<p>Vyom<br>MoveInSync</p>\n' +
-      '<p style="color:#888888;font-size:12px">Not relevant? Reply, or write to {{unsubscribe}}, and I will not contact you again.<br>\n' +
+      '<p style="color:#888888;font-size:12px">Not relevant? Reply, or write to {{unsubscribe}},\n' +
+      'and I will not contact you again.<br>\n' +
       'MoveInSync Technologies, Bengaluru, India</p>';
-    setMsg('saveStatus', 'Sample loaded. It uses {{{intro_html}}} — your CSV needs an intro_html column, or remove that tag.', 'good');
+    setMsg('saveStatus', 'Sample loaded — uses only built-in fields, so Preview works immediately. Add {{{yourColumn}}} once your CSV has one.', 'good');
   };
 
   $('btnSave').onclick = function () {
     setMsg('saveStatus', 'Saving…');
     const done = function (id) {
       currentCampaignId = id;
-      setMsg('saveStatus', 'Saved as ' + id + '. Preview, then send a test.', 'good');
+      setMsg('saveStatus', 'Saved as ' + id + '. Preview it, then send a test.', 'good');
       $('btnSeed').disabled = false;
       $('btnImport').disabled = !pendingCsvText;
-      refreshCampaigns(); doPreview();
+      refreshCampaigns(); refreshReadiness(); doPreview();
     };
     if (currentCampaignId) {
       google.script.run.withSuccessHandler(function () { done(currentCampaignId); })
@@ -180,24 +334,51 @@
     }
   };
 
+  /**
+   * Custom columns are only known once the body references them, so the sample
+   * inputs for them are generated from the tokens the server found — otherwise
+   * previewing a body that uses a CSV column is impossible without uploading
+   * the CSV first.
+   */
+  function renderCustomSampleInputs(tokens) {
+    const custom = (tokens || []).filter(function (t) { return STANDARD_TOKENS.indexOf(t) === -1; });
+    if (!custom.length) { $('customSamples').innerHTML = ''; return; }
+    $('customSamples').innerHTML = '<label>Sample values for your CSV columns</label>'
+      + custom.map(function (t) {
+          const v = customSampleValues[t] || '';
+          return '<input type="text" data-token="' + esc(t) + '" placeholder="' + esc(t) + '" value="' + esc(v) + '" style="margin-bottom:6px">';
+        }).join('');
+    $('customSamples').querySelectorAll('input').forEach(function (inp) {
+      inp.oninput = function () { customSampleValues[inp.dataset.token] = inp.value; };
+      if (!customSampleValues[inp.dataset.token]) {
+        customSampleValues[inp.dataset.token] = 'sample ' + inp.dataset.token;
+        inp.value = customSampleValues[inp.dataset.token];
+      }
+    });
+  }
+
   function doPreview() {
     if (!currentCampaignId) { setMsg('previewError', 'Save the draft first.', 'bad'); return; }
     google.script.run.withSuccessHandler(function (r) {
       $('tokens').innerHTML = (r.tokensInBody || [])
         .map(function (t) { return '<span class="token">{{' + esc(t) + '}}</span>'; }).join('');
+      renderCustomSampleInputs(r.tokensInBody);
       if (!r.ok) {
-        setMsg('previewError', r.error, 'bad'); $('previewFrame').srcdoc = ''; setMsg('previewMeta', '');
+        setMsg('previewError', clean(r.error)
+          + '\n\nFill in a sample value above for each custom column, then Preview again.', 'bad');
+        $('previewFrame').srcdoc = ''; setMsg('previewMeta', '');
         return;
       }
       setMsg('previewError', '');
       $('previewFrame').srcdoc = r.html;
       const over = r.bytes >= r.maxBytes;
-      setMsg('previewMeta', 'Subject: ' + r.subject + '\nPreheader: ' + (r.preheader || '(none)')
-        + '\n' + r.bytes + ' / ' + r.maxBytes + ' bytes' + (over ? '  — OVER LIMIT, Gmail will clip this' : ''),
+      setMsg('previewMeta', 'Subject  ' + r.subject + '\nPreheader  ' + (r.preheader || '(none)')
+        + '\nSize  ' + r.bytes + ' / ' + r.maxBytes + ' bytes' + (over ? '  — OVER LIMIT, Gmail will clip this' : ''),
         over ? 'bad' : '');
+      refreshReadiness();
     }).withFailureHandler(fail('previewError')).previewCampaign(currentCampaignId, {
       first_name: $('sampleFirstName').value, company: $('sampleCompany').value,
-      title: $('sampleTitle').value, custom: {},
+      title: $('sampleTitle').value, custom: customSampleValues,
     });
   }
   $('btnPreview').onclick = doPreview;
@@ -205,14 +386,15 @@
   $('btnSeed').onclick = function () {
     setMsg('seedStatus', 'Queuing…');
     google.script.run.withSuccessHandler(function () {
-      setMsg('seedStatus', 'Queued — sends on the next agent poll. Check the seed inboxes before marking passed.', 'good');
+      setMsg('seedStatus', 'Queued — sends on the next agent poll (about a minute). Check the seed inboxes, then confirm.', 'good');
       $('btnMarkSeed').disabled = false;
     }).withFailureHandler(fail('seedStatus')).enqueueSeedSend(currentCampaignId);
   };
   $('btnMarkSeed').onclick = function () {
-    if (!confirm('Confirm you have opened the seed mailboxes and the rendering looked correct?')) return;
+    if (!confirm('Confirm you opened the seed mailboxes and the rendering looked correct?')) return;
     google.script.run.withSuccessHandler(function () {
-      setMsg('seedStatus', 'Seed pass recorded — valid 24 hours.', 'good'); refreshCampaigns();
+      setMsg('seedStatus', 'Seed pass recorded — valid 24 hours.', 'good');
+      refreshCampaigns(); refreshReadiness();
     }).withFailureHandler(fail('seedStatus')).markSeedPassed(currentCampaignId);
   };
 
@@ -236,7 +418,7 @@
   };
   $('fileInput').onchange = function (e) { if (e.target.files.length) readCsv(e.target.files[0]); };
 
-  // Read client-side and send the text: google.script.run cannot accept a File,
+  // Read client-side and post the text: google.script.run cannot accept a File,
   // and a list small enough for this tool is small enough to pass as a string.
   function readCsv(file) {
     const reader = new FileReader();
@@ -244,7 +426,7 @@
       pendingCsvText = reader.result;
       renderCsvPreview(file.name, pendingCsvText);
       $('btnImport').disabled = !currentCampaignId;
-      if (!currentCampaignId) setMsg('importStatus', 'Save the campaign first, then import.', 'bad');
+      if (!currentCampaignId) setMsg('importStatus', 'Save the campaign on the Compose tab first, then import.', 'warn');
     };
     reader.readAsText(file);
   }
@@ -256,19 +438,20 @@
     const body = cells.slice(1).map(function (r) {
       return '<tr>' + r.map(function (c) { return '<td>' + esc(c) + '</td>'; }).join('') + '</tr>';
     }).join('');
-    $('csvPreview').innerHTML = '<div class="hint" style="margin-top:8px">' + esc(fileName) + ' — '
+    $('csvPreview').innerHTML = '<div class="hint" style="margin-top:10px"><strong>' + esc(fileName) + '</strong> — '
       + (lines.length - 1) + ' data row(s), showing up to 5</div>'
-      + '<table class="mini"><tr>' + head + '</tr>' + body + '</table>';
+      + '<div style="overflow-x:auto"><table class="mini"><tr>' + head + '</tr>' + body + '</table></div>';
   }
 
   $('btnImport').onclick = function () {
     setMsg('importStatus', 'Importing…');
     google.script.run.withSuccessHandler(function (r) {
-      setMsg('importStatus', 'Imported ' + r.imported + ' · duplicates ' + r.duplicates
-        + ' · suppressed ' + r.suppressed + ' · invalid ' + r.invalid
+      setMsg('importStatus', 'Imported ' + r.imported + '  ·  duplicates ' + r.duplicates
+        + '  ·  suppressed ' + r.suppressed + '  ·  invalid ' + r.invalid
         + (r.invalid ? '\nRows needing attention: ' + r.invalidRows.map(function (x) {
             return x.row + (x.reason ? ' (' + x.reason + ')' : '');
-          }).join(', ') : ''), r.invalid ? 'bad' : 'good');
+          }).join(', ') : ''), r.invalid ? 'warn' : 'good');
+      refreshReadiness();
     }).withFailureHandler(fail('importStatus')).importRecipientsCsv(currentCampaignId, pendingCsvText);
   };
 
@@ -276,7 +459,7 @@
     if (!confirm('Suppression is permanent and global — these addresses will never receive mail from any campaign or sender again.')) return;
     google.script.run.withSuccessHandler(function (r) {
       setMsg('suppressStatus', 'Suppressed ' + r.suppressed
-        + (r.invalid.length ? ' · unparsed: ' + r.invalid.join(', ') : ''), 'good');
+        + (r.invalid.length ? '  ·  unparsed: ' + r.invalid.join(', ') : ''), 'good');
       $('suppressText').value = '';
     }).withFailureHandler(fail('suppressStatus'))
       .manuallySuppressBulk($('suppressText').value, 'unsubscribe request relayed by sender');
@@ -288,74 +471,116 @@
   };
 
   // ── launch ────────────────────────────────────────────────────
+  function refreshReadiness() {
+    if (!currentCampaignId) {
+      $('readinessRail').innerHTML = '<div class="hint">No campaign selected — start on the Compose tab.</div>';
+      $('campaignChip').style.display = 'none';
+      return;
+    }
+    google.script.run.withSuccessHandler(function (r) {
+      if (!r.exists) return;
+      $('campaignChip').style.display = '';
+      $('campaignChip').innerHTML = '<span class="dot"></span>' + esc(r.name) + ' · ' + esc(r.status);
+      $('readinessRail').innerHTML = r.steps.map(function (s) {
+        return '<div class="rstep ' + (s.done ? 'done' : 'todo') + '">'
+          + '<span class="mark">' + (s.done ? '✓' : '○') + '</span>' + esc(s.label)
+          + (s.hint ? ' <em>' + esc(s.hint) + '</em>' : '') + '</div>';
+      }).join('');
+      $('btnLaunchCanary').disabled = !r.canLaunch;
+      setMsg('launchReady', r.canLaunch
+        ? 'All gates clear — the canary will send to the first 5 of ' + r.recipientCount + ' recipients.'
+        : 'Complete the outstanding steps above before launching.', r.canLaunch ? 'good' : '');
+    }).withFailureHandler(function () {}).getCampaignReadiness(currentCampaignId);
+  }
+  $('btnRefreshReadiness').onclick = refreshReadiness;
+
   $('btnPreflight').onclick = function () {
     google.script.run.withSuccessHandler(function (r) {
       $('preflightResults').innerHTML = r.checks.map(function (c) {
         const advisory = c.blocking === false;
-        const label = c.ok ? 'PASS' : (advisory ? 'NOTE' : 'BLOCKED');
+        const label = c.ok ? '✓ PASS' : (advisory ? '! NOTE' : '✕ BLOCKED');
         const colour = c.ok ? 'var(--good)' : (advisory ? 'var(--warn)' : 'var(--bad)');
-        return '<div style="font-size:12px;color:' + colour + '">' + label + ' — ' + esc(c.name)
-          + (c.detail ? ' · ' + esc(c.detail) : '') + '</div>';
+        return '<div style="font-size:12px;color:' + colour + ';padding:3px 0">' + label + '  ' + esc(c.name)
+          + (c.detail ? '  ·  ' + esc(c.detail) : '') + '</div>';
       }).join('');
+      refreshReadiness();
     }).withFailureHandler(function (err) {
-      $('preflightResults').innerHTML = '<div class="msg bad">' + esc(err.message) + '</div>';
+      $('preflightResults').innerHTML = '<div class="msg bad">' + esc(clean(err.message)) + '</div>';
     }).checkPreflight(currentCampaignId);
   };
   $('btnApprove').onclick = function () {
-    google.script.run.withSuccessHandler(function () { setMsg('launchStatus', 'Approved.', 'good'); })
-      .withFailureHandler(fail('launchStatus')).approveCampaignAsExec(currentCampaignId);
+    google.script.run.withSuccessHandler(function () {
+      setMsg('launchStatus', 'Approved.', 'good'); refreshReadiness();
+    }).withFailureHandler(fail('launchStatus')).approveCampaignAsExec(currentCampaignId);
   };
   $('btnLaunchCanary').onclick = function () {
     if (!confirm('Launch the canary — real mail to the first 5 real recipients. This cannot be undone.')) return;
     setMsg('launchStatus', 'Launching…');
     google.script.run.withSuccessHandler(function () {
       setMsg('launchStatus', 'Canary launched. Review what actually went out before releasing the rest.', 'good');
-      refreshCampaigns();
+      refreshCampaigns(); refreshReadiness();
     }).withFailureHandler(fail('launchStatus')).launchCampaignCanary(currentCampaignId);
   };
   $('btnReleaseCanary').onclick = function () {
     if (!confirm('Release every remaining recipient into the send queue?')) return;
     google.script.run.withSuccessHandler(function () {
-      setMsg('launchStatus', 'Remaining recipients scheduled.', 'good'); refreshCampaigns();
+      setMsg('launchStatus', 'Remaining recipients scheduled.', 'good');
+      refreshCampaigns(); refreshReadiness();
     }).withFailureHandler(fail('launchStatus')).releaseCanary(currentCampaignId);
   };
 
   // ── health ────────────────────────────────────────────────────
-  function card(value, label, colour) {
-    return '<div class="card"><b' + (colour ? ' style="color:' + colour + '"' : '') + '>' + esc(value) + '</b>'
+  function stat(value, label, colour) {
+    return '<div class="stat"><b' + (colour ? ' style="color:' + colour + '"' : '') + '>' + esc(value) + '</b>'
       + '<span>' + esc(label) + '</span></div>';
   }
 
+  // Skeleton rows so the tab never shows a bare "loading…" against empty
+  // panels — same shape as the real content, so nothing visibly jumps when
+  // the data arrives.
+  function healthSkeleton_() {
+    return new Array(3).join('<div class="row"><span style="flex:1"><div class="skel" style="height:13px;width:60%"></div>'
+      + '<div class="skel" style="height:10px;width:40%;margin-top:6px"></div></span></div>');
+  }
+  function showHealthSkeleton() {
+    $('systemCards').innerHTML = new Array(6).join('<div class="stat"><div class="skel" style="height:22px;width:70%"></div>'
+      + '<div class="skel" style="height:10px;width:90%;margin-top:6px"></div></div>');
+    $('healthSenders').innerHTML = healthSkeleton_();
+    $('healthCampaigns').innerHTML = healthSkeleton_();
+  }
+
   function refreshHealth() {
-    $('healthAge').textContent = ' loading…';
+    $('healthAge').textContent = 'refreshing…';
+    if (!$('systemCards').children.length) showHealthSkeleton();
     google.script.run.withSuccessHandler(function (h) {
+      hideBar();
       const s = h.system;
-      $('healthAge').textContent = ' as of ' + new Date(h.generatedAt).toLocaleTimeString();
+      $('healthAge').textContent = 'as of ' + new Date(h.generatedAt).toLocaleTimeString();
       $('systemCards').innerHTML =
-          card(s.killSwitch ? 'STOPPED' : 'running', 'sending', s.killSwitch ? 'var(--bad)' : 'var(--good)')
-        + card(s.sendersActive + '/' + s.sendersTotal, 'senders live', s.sendersActive ? '' : 'var(--warn)')
-        + card(s.sentAllTime, 'sent all time')
-        + card(s.repliedAllTime + ' (' + s.replyRatePct + '%)', 'replies recorded')
-        + card(s.bouncedAllTime + ' (' + s.bounceRatePct + '%)', 'bounces · halts at ' + s.bounceHaltAt + '%',
+          stat(s.killSwitch ? 'STOPPED' : 'running', 'sending', s.killSwitch ? 'var(--bad)' : 'var(--good)')
+        + stat(s.sendersActive + '/' + s.sendersTotal, 'senders live', s.sendersActive ? '' : 'var(--warn)')
+        + stat(s.sentAllTime, 'sent all time')
+        + stat(s.repliedAllTime + ' · ' + s.replyRatePct + '%', 'replies recorded')
+        + stat(s.bouncedAllTime + ' · ' + s.bounceRatePct + '%', 'bounces, halts at ' + s.bounceHaltAt + '%',
                s.bounceRatePct > s.bounceHaltAt ? 'var(--bad)' : '')
-        + card(s.suppressionCount, 'suppressed')
-        + (s.signalsDegraded ? card(s.signalsDegraded, 'agents without reply detection', 'var(--warn)') : '');
+        + stat(s.suppressionCount, 'suppressed')
+        + (s.signalsDegraded ? stat(s.signalsDegraded, 'agents without reply detection', 'var(--warn)') : '');
 
       $('healthSenders').innerHTML = h.senders.length ? h.senders.map(function (x) {
         const pct = Math.min(100, x.capUsedPct);
-        return '<div class="row"><span>' + esc(x.displayName) + ' &lt;' + esc(x.email) + '&gt;'
+        return '<div class="row"><span><strong>' + esc(x.displayName) + '</strong> <span class="hint">' + esc(x.email) + '</span>'
           + '<div class="hint">' + esc(x.transport)
-          + ' · ' + (x.signalsWorking ? '<span style="color:var(--good)">reply detection on</span>'
-                                      : '<span style="color:var(--warn)">reply detection off</span>')
-          + ' · ' + (x.stale ? '<span style="color:var(--bad)">no recent heartbeat</span>' : 'live')
-          + ' · agent ' + esc(x.agentVersion) + ' · ' + esc(x.providerQuota) + ' provider sends left</div>'
-          + '<div class="hint">' + x.sentToday + ' / ' + x.capToday + ' of today\'s cap'
-          + '<div class="bar" style="color:' + (pct > 90 ? 'var(--warn)' : 'var(--good)') + '">'
-          + '<i style="width:' + pct + '%"></i></div></div>'
-          + '</span><span class="pill">' + esc(x.status) + '</span></div>';
-      }).join('') : '<div class="hint">No senders onboarded.</div>';
+          + '  ·  ' + (x.signalsWorking ? '<span style="color:var(--good)">reply detection on</span>'
+                                        : '<span style="color:var(--warn)">reply detection off</span>')
+          + '  ·  ' + (x.stale ? '<span style="color:var(--bad)">no recent heartbeat</span>' : 'live')
+          + '  ·  agent ' + esc(x.agentVersion) + '  ·  ' + esc(x.providerQuota) + ' provider sends left</div>'
+          + '<div class="hint" style="margin-top:5px">' + x.sentToday + ' / ' + x.capToday + ' of today\'s cap'
+          + '<div class="bar"><i style="width:' + pct + '%;background:'
+          + (pct > 90 ? 'var(--warn)' : 'var(--good)') + '"></i></div></div>'
+          + '</span><span class="chip">' + esc(x.status) + '</span></div>';
+      }).join('') : '<div class="empty">No senders onboarded.</div>';
 
-      $('healthCampaigns').innerHTML = h.campaigns.length ? '<table class="mini">'
+      $('healthCampaigns').innerHTML = h.campaigns.length ? '<div style="overflow-x:auto"><table class="mini">'
         + '<tr><th>Campaign</th><th>Status</th><th>Total</th><th>Sent</th><th>Replied</th>'
         + '<th>Bounced</th><th>Opted out</th><th>Failed</th><th>Queued</th><th>Next due</th></tr>'
         + h.campaigns.map(function (c) {
@@ -365,55 +590,74 @@
             + '<td' + (c.failed ? ' style="color:var(--bad)"' : '') + '>' + c.failed + '</td>'
             + '<td>' + c.pendingSends + '</td>'
             + '<td>' + (c.nextDue ? new Date(c.nextDue).toLocaleString() : '—') + '</td></tr>';
-        }).join('') + '</table>' : '<div class="hint">No campaigns yet.</div>';
+        }).join('') + '</table></div>' : '<div class="empty">No campaigns yet.</div>';
 
-      $('healthFailures').innerHTML = h.failures.length ? '<table class="mini">'
+      $('healthFailures').innerHTML = h.failures.length ? '<div style="overflow-x:auto"><table class="mini">'
         + '<tr><th>Queue row</th><th>Sender</th><th>Attempts</th><th>Error</th></tr>'
         + h.failures.map(function (f) {
           return '<tr><td>' + esc(f.id) + '</td><td>' + esc(f.sender) + '</td><td>' + esc(f.attempts) + '</td>'
             + '<td style="white-space:normal;color:var(--bad)">' + esc(f.error) + '</td></tr>';
-        }).join('') + '</table>' : '<div class="hint" style="color:var(--good)">No failures recorded.</div>';
+        }).join('') + '</table></div>'
+        : '<div class="empty" style="color:var(--good)">No failures recorded.</div>';
 
-      $('healthEvents').innerHTML = h.events.length ? '<table class="mini">'
+      $('healthEvents').innerHTML = h.events.length ? '<div style="overflow-x:auto"><table class="mini">'
         + '<tr><th>When</th><th>Who</th><th>What</th><th>Detail</th></tr>'
         + h.events.map(function (e) {
           return '<tr><td>' + (e.ts ? new Date(e.ts).toLocaleString() : '') + '</td>'
             + '<td>' + esc(e.actor) + '</td><td>' + esc(e.type) + '</td>'
             + '<td style="white-space:normal">' + esc(e.detail) + '</td></tr>';
-        }).join('') + '</table>' : '<div class="hint">No events yet.</div>';
+        }).join('') + '</table></div>' : '<div class="empty">No events yet.</div>';
     }).withFailureHandler(function (err) {
+      hideBar();
       $('healthAge').textContent = '';
-      $('systemCards').innerHTML = '<div class="msg bad">' + esc(err.message) + '</div>';
+      $('systemCards').innerHTML = '<div class="msg bad">' + esc(clean(err.message)) + '</div>';
     }).getHealthSnapshot();
   }
   $('btnRefreshHealth').onclick = refreshHealth;
 
   // ── shared chrome ─────────────────────────────────────────────
+  function applyKillSwitch(on) {
+    const el = $('killSwitchState');
+    el.innerHTML = '<span class="dot"></span>' + (on ? 'kill switch ON' : 'sending enabled');
+    el.className = 'chip ' + (on ? 'bad' : 'good');
+  }
   function refreshKillSwitch() {
-    google.script.run.withSuccessHandler(function (on) {
-      const el = $('killSwitchState');
-      el.textContent = on ? 'KILL SWITCH ON' : 'sending enabled';
-      el.style.background = on ? '#f5c2c2' : '#c8f0c8';
-      el.style.color = '#1a1a1a';
-    }).getKillSwitchStatus();
+    google.script.run.withSuccessHandler(function (on) { hideBar(); applyKillSwitch(on); })
+      .withFailureHandler(hideBar).getKillSwitchStatus();
   }
   $('btnToggleKill').onclick = function () {
     const on = $('killSwitchState').textContent.indexOf('ON') !== -1;
     if (!on && !confirm('Stop every sender? Nothing will send until this is turned back on.')) return;
-    google.script.run.withSuccessHandler(refreshKillSwitch).setKillSwitch(!on);
+    google.script.run.withSuccessHandler(function (v) { hideBar(); applyKillSwitch(v); })
+      .withFailureHandler(hideBar).setKillSwitch(!on);
   };
 
+  function applyCampaignList(cs) {
+    $('campaignList').innerHTML = cs.length ? cs.map(function (c) {
+      const sel = c.id === currentCampaignId;
+      return '<div class="row"><span><strong>' + esc(c.name) + '</strong>'
+        + (sel ? ' <span class="chip good tiny">open</span>' : '')
+        + '<div class="hint">' + esc(c.id)
+        + (c.interval_minutes ? '  ·  ' + esc(c.interval_minutes) + ' min gap' : '  ·  auto-spaced')
+        + (c.projected_completion ? '  ·  finishes ' + esc(c.projected_completion) : '') + '</div></span>'
+        + '<span class="chip">' + esc(c.status) + '</span></div>';
+    }).join('') : '<div class="empty">No campaigns yet.</div>';
+  }
   function refreshCampaigns() {
-    google.script.run.withSuccessHandler(function (cs) {
-      $('campaignList').innerHTML = cs.length ? cs.map(function (c) {
-        return '<div class="row"><span>' + esc(c.name) + '<div class="hint">' + esc(c.id)
-          + (c.interval_minutes ? ' · ' + esc(c.interval_minutes) + ' min gap' : ' · auto-spaced')
-          + (c.projected_completion ? ' · finishes ' + esc(c.projected_completion) : '') + '</div></span>'
-          + '<span class="pill">' + esc(c.status) + '</span></div>';
-      }).join('') : '<div class="hint">No campaigns yet.</div>';
-    }).listCampaigns();
+    google.script.run.withSuccessHandler(function (cs) { hideBar(); applyCampaignList(cs); })
+      .withFailureHandler(hideBar).listCampaigns();
   }
 
-  refreshKillSwitch();
-  refreshCampaigns();
+  // First paint: one round trip instead of three (see getBootstrap's own
+  // comment in admin/Code.gs for why that matters on Apps Script specifically).
+  google.script.run.withSuccessHandler(function (boot) {
+    hideBar();
+    applyClientConfig(boot.config);
+    applyKillSwitch(boot.killSwitch);
+    applyCampaignList(boot.campaigns);
+  }).withFailureHandler(function (err) {
+    hideBar();
+    $('campaignList').innerHTML = '<div class="msg bad">Failed to load: ' + esc(clean(err.message)) + '</div>';
+  }).getBootstrap();
+  refreshReadiness();
 </script>

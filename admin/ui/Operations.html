@@ -3,19 +3,19 @@
   the current rules of the system, and where to look when something breaks.
   Exists so routine operation never requires opening the code.
 -->
-<div class="step">
+<div class="card">
   <h2><span class="num">⚙</span> Agent</h2>
   <div class="hint">Each sending exec runs their own agent inside their own Google account. These links act on whoever is signed in when they are opened — send them to the exec, do not open them yourself expecting to configure someone else.</div>
   <div id="agentLinks" class="hint">Loading…</div>
 </div>
 
-<div class="step">
+<div class="card">
   <h2><span class="num">▤</span> Current rules</h2>
   <div class="hint">Set in <code>shared/Config.gs</code>. Changing any of these is a code edit and a redeploy — deliberately, because they are the guardrails.</div>
   <div id="rulesTable"></div>
 </div>
 
-<div class="step">
+<div class="card">
   <h2><span class="num">?</span> When something looks wrong</h2>
   <ol class="hint" style="line-height:1.7">
     <li><strong>Nothing is sending.</strong> Check the kill switch on the Health tab, then whether the sender shows a recent heartbeat. No heartbeat means the agent's trigger is gone — the exec re-runs <em>Onboard</em>.</li>
@@ -27,7 +27,7 @@
   </ol>
 </div>
 
-<div class="step">
+<div class="card">
   <h2><span class="num">▦</span> Reference</h2>
   <div class="hint" style="line-height:1.8">
     <code>docs/TEST_PLAN.md</code> — manual tests, including the two-sends-five-minutes-apart run<br>

@@ -3,32 +3,32 @@
   what agents reported, what admins did. There is no open or click rate here
   because there is no tracking pixel and no link rewriting; see docs/ANALYTICS.md.
 -->
-<div class="step">
+<div class="card">
   <h2><span class="num">♥</span> System</h2>
   <button id="btnRefreshHealth" class="secondary">Refresh</button>
   <span id="healthAge" class="hint"></span>
-  <div id="systemCards" class="cards"></div>
+  <div id="systemCards" class="stats"></div>
 </div>
 
-<div class="step">
+<div class="card">
   <h2><span class="num">◎</span> Senders</h2>
   <div class="hint">Cap usage is today's prospect sends against the ramped daily cap. "Reply detection off" means that agent cannot see replies, bounces, or opt-outs — keep those campaigns single-touch.</div>
   <div id="healthSenders"></div>
 </div>
 
-<div class="step">
+<div class="card">
   <h2><span class="num">⇢</span> Campaign funnel</h2>
   <div class="hint">Sent → replied → opted out, per campaign, plus what is still queued and when the next message is due.</div>
   <div id="healthCampaigns"></div>
 </div>
 
-<div class="step">
+<div class="card">
   <h2><span class="num">⚠</span> Recent failures</h2>
   <div class="hint">The first place to look when something is wrong. Empty is good.</div>
   <div id="healthFailures"></div>
 </div>
 
-<div class="step">
+<div class="card">
   <h2><span class="num">§</span> Audit trail</h2>
   <div class="hint">Append-only. Every send, admin action, config change, and halt — who, what, when. Never message content.</div>
   <div id="healthEvents"></div>

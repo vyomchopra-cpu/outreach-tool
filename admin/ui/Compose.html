@@ -1,6 +1,7 @@
 <!-- Steps 1-3: compose, preview, test send. Included by ui/Index.html. -->
-<div class="step">
+<div class="card">
   <h2><span class="num">1</span> Compose</h2>
+  <div class="hint">Merge tags pull from your CSV columns. <code>{{token}}</code> inserts text safely; <code>{{{token}}}</code> inserts a column's raw HTML.</div>
   <div class="cols">
     <div>
       <label>Campaign name</label>
@@ -15,7 +16,7 @@
       <label>Send from</label>
       <div class="senders" id="senders">Loading…</div>
 
-      <div class="cols" style="gap:12px">
+      <div class="cols" style="gap:14px">
         <div>
           <label>Scheduling clock</label>
           <select id="tzMode">
@@ -26,19 +27,15 @@
         <div>
           <label>Gap between sends</label>
           <input type="number" id="intervalMinutes" min="1" placeholder="auto">
-          <div class="hint">Blank spreads the day's cap evenly with jitter — best for real campaigns. A number forces a fixed gap in minutes.</div>
+          <div class="hint" style="margin-top:5px">Blank spreads the day's cap evenly with jitter — best for real campaigns. A number forces a fixed gap in minutes.</div>
         </div>
       </div>
     </div>
 
     <div>
-      <label>Body — HTML</label>
-      <div class="hint" style="margin-bottom:4px">
-        Inline styles only (Gmail strips <code>&lt;style&gt;</code>).
-        <code>{{token}}</code> inserts text safely · <code>{{{token}}}</code> inserts a column's raw HTML ·
-        must contain <code>{{unsubscribe}}</code>.
-      </div>
+      <label>Body — HTML <span class="hint">inline styles only; Gmail strips &lt;style&gt;</span></label>
       <textarea id="bodySource" placeholder="&lt;p&gt;Hi {{firstName}},&lt;/p&gt;"></textarea>
+      <div class="hint" style="margin-top:6px">Must contain <code>{{unsubscribe}}</code> — preflight blocks without it.</div>
       <button id="btnLoadSample" class="secondary">Load sample</button>
     </div>
   </div>
@@ -47,7 +44,7 @@
   <div id="saveStatus" class="msg"></div>
 </div>
 
-<div class="step">
+<div class="card">
   <h2><span class="num">2</span> Preview</h2>
   <div class="hint">Rendered by the same function that sends the real mail — not a separate preview renderer.</div>
   <div class="cols">
@@ -56,6 +53,7 @@
       <input type="text" id="sampleFirstName" placeholder="First name" value="Sam">
       <input type="text" id="sampleCompany" placeholder="Company" value="Example Corp" style="margin-top:6px">
       <input type="text" id="sampleTitle" placeholder="Title" value="VP Engineering" style="margin-top:6px">
+      <div id="customSamples" style="margin-top:12px"></div>
       <div class="tokens" id="tokens"></div>
       <div id="previewMeta" class="msg"></div>
       <div id="previewError" class="msg bad"></div>
@@ -64,9 +62,9 @@
   </div>
 </div>
 
-<div class="step">
+<div class="card">
   <h2><span class="num">3</span> Test send</h2>
-  <div class="hint">Goes to the seed mailboxes, ignoring the 9–5 window. A campaign cannot launch without a confirmed seed pass from the last 24 hours.</div>
+  <div class="hint">Goes to the seed mailboxes, ignoring the 9–5 window so you can check rendering at any hour. A campaign cannot launch without a confirmed seed pass from the last 24 hours.</div>
   <button id="btnSeed" class="secondary" disabled>Send test emails</button>
   <button id="btnMarkSeed" class="secondary" disabled>I checked them — mark passed</button>
   <div id="seedStatus" class="msg"></div>
