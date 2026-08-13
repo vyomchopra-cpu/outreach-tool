@@ -159,6 +159,52 @@ function runDetectors_() {
 
 // ─── Alerting ───────────────────────────────────────────────────────────────
 
+/**
+ * Configured from the Health tab, not the Apps Script editor. A webhook URL
+ * carries its own key in the query string — anyone holding it can post into
+ * the space — so it goes into this project's private Script Properties by
+ * the same route as the Reoon key (admin/EmailVerify.gs setReoonApiKey) and
+ * is never read back into the UI, never logged, and never in the repo.
+ */
+function getChatWebhookStatus() {
+  requireAdmin_();
+  const url = PropertiesService.getScriptProperties().getProperty('CHAT_WEBHOOK_URL') || '';
+  return {
+    configured: !!url,
+    // Enough to tell two spaces apart when rotating, not enough to post with.
+    hint: url ? url.replace(/^https:\/\/([^/]+).*$/, '$1') + ' · …' + url.slice(-6) : '',
+    monitoringInstalled: ScriptApp.getProjectTriggers()
+      .some(function (t) { return t.getHandlerFunction() === 'runHealthCheck_'; }),
+  };
+}
+
+function setChatWebhook(url) {
+  const admin = requireAdmin_();
+  const clean = String(url || '').trim();
+  if (!clean) throw new Error('Webhook URL was empty');
+  if (!/^https:\/\/chat\.googleapis\.com\//.test(clean)) {
+    throw new Error('That is not a Google Chat webhook — it should start with https://chat.googleapis.com/');
+  }
+  PropertiesService.getScriptProperties().setProperty('CHAT_WEBHOOK_URL', clean);
+  logEvent_(admin, 'config_change', { detail: { action: 'set_chat_webhook' } }); // never the value
+  return { configured: true };
+}
+
+function clearChatWebhook() {
+  const admin = requireAdmin_();
+  PropertiesService.getScriptProperties().deleteProperty('CHAT_WEBHOOK_URL');
+  logEvent_(admin, 'config_change', { detail: { action: 'clear_chat_webhook' } });
+  return { configured: false };
+}
+
+/** Installs the recurring health check from the console, so nothing here needs the editor's Run button. */
+function installHealthMonitoring() {
+  const admin = requireAdmin_();
+  setupHealthMonitoring_();
+  logEvent_(admin, 'config_change', { detail: { action: 'install_health_monitoring', everyMinutes: MONITOR_INTERVAL_MIN } });
+  return { installed: true, everyMinutes: MONITOR_INTERVAL_MIN };
+}
+
 function notifyChat_(inc) {
   const url = PropertiesService.getScriptProperties().getProperty('CHAT_WEBHOOK_URL');
   if (!url) return false;

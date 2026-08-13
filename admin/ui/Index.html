@@ -700,8 +700,50 @@
   $('btnTestAlert').onclick = function () {
     setMsg('monitorStatus', 'Sending…');
     google.script.run.withSuccessHandler(function (r) {
-      setMsg('monitorStatus', r.sent ? 'Sent — check the Chat space.' : 'Not sent — CHAT_WEBHOOK_URL is not set in Script Properties.', r.sent ? 'good' : 'warn');
+      setMsg('monitorStatus', r.sent ? 'Sent — check the Chat space.' : 'Not sent — save a Chat webhook below first.', r.sent ? 'good' : 'warn');
     }).withFailureHandler(fail('monitorStatus')).sendTestAlert();
+  };
+
+  // ── alerts & keys: set here, never read back ──────────────────
+  function applyChatStatus(s) {
+    const badge = $('chatConfigured');
+    badge.textContent = s.configured ? '· saved (' + s.hint + ')' : '· not set';
+    $('btnInstallMonitoring').textContent = s.monitoringInstalled
+      ? 'Re-install 15-min check' : 'Install 15-min check';
+  }
+  google.script.run.withSuccessHandler(applyChatStatus).getChatWebhookStatus();
+
+  $('btnSaveChatWebhook').onclick = function () {
+    const url = $('chatWebhook').value.trim();
+    if (!url) { setMsg('chatStatus', 'Paste the webhook URL first.', 'bad'); return; }
+    google.script.run.withSuccessHandler(function () {
+      $('chatWebhook').value = '';
+      setMsg('chatStatus', 'Saved. Use "Send test alert" above to confirm it lands.', 'good');
+      google.script.run.withSuccessHandler(applyChatStatus).getChatWebhookStatus();
+    }).withFailureHandler(fail('chatStatus')).setChatWebhook(url);
+  };
+
+  $('btnInstallMonitoring').onclick = function () {
+    setMsg('chatStatus', 'Installing…');
+    google.script.run.withSuccessHandler(function (r) {
+      setMsg('chatStatus', 'Health check now runs every ' + r.everyMinutes + ' minutes.', 'good');
+      google.script.run.withSuccessHandler(applyChatStatus).getChatWebhookStatus();
+    }).withFailureHandler(fail('chatStatus')).installHealthMonitoring();
+  };
+
+  function applyReoonStatus2(r) {
+    $('reoonConfigured2').textContent = r.configured ? '· saved · ' + r.mode + ' mode' : '· not set';
+  }
+  google.script.run.withSuccessHandler(applyReoonStatus2).getReoonStatus();
+
+  $('btnSaveReoonKey2').onclick = function () {
+    const key = $('reoonKey2').value.trim();
+    if (!key) { setMsg('reoonStatus2', 'Paste a key first.', 'bad'); return; }
+    google.script.run.withSuccessHandler(function () {
+      $('reoonKey2').value = '';
+      setMsg('reoonStatus2', 'Key saved.', 'good');
+      google.script.run.withSuccessHandler(applyReoonStatus2).getReoonStatus();
+    }).withFailureHandler(fail('reoonStatus2')).setReoonApiKey(key);
   };
 
   // ── delegation: asking someone to let you send as them ─────────

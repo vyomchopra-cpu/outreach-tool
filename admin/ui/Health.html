@@ -33,15 +33,50 @@
   <div class="hint">
     Runs automatically every 15 minutes — kill switch state, stale agents, a
     growing backlog of overdue sends, bounce-rate breaches, and unremoved
-    risky addresses. Alerts go to Google Chat if configured (Script Properties
-    → <code>CHAT_WEBHOOK_URL</code>) — see <code>admin/Monitor.gs</code>'s
-    header comment for one-time setup. Without it, incidents still get
-    recorded here, just no push.
+    risky addresses. Without a Chat webhook, incidents are still recorded
+    here — you just have to come and look.
   </div>
   <button id="btnCheckNow" class="secondary">Check now</button>
   <button id="btnTestAlert" class="secondary">Send test alert</button>
   <div id="monitorStatus" class="msg"></div>
   <div id="incidentsList" style="margin-top:10px"></div>
+</div>
+
+<div class="card">
+  <h2><span class="num">⚙</span> Alerts &amp; keys</h2>
+  <div class="hint">
+    Both of these are stored privately in this project and are never shown
+    back to you, logged, or committed. Set once; rotate here if either leaks.
+  </div>
+
+  <div class="cols">
+    <div>
+      <label>Google Chat webhook <span id="chatConfigured" class="hint"></span></label>
+      <div class="hint" style="margin-bottom:6px">
+        In the Chat space → space name → <b>Apps &amp; integrations</b> →
+        <b>Manage webhooks</b> → <b>Add webhook</b> → copy the URL.
+      </div>
+      <input type="password" id="chatWebhook" placeholder="https://chat.googleapis.com/v1/spaces/…">
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button id="btnSaveChatWebhook" class="secondary">Save webhook</button>
+        <button id="btnInstallMonitoring" class="secondary">Install 15-min check</button>
+      </div>
+      <div id="chatStatus" class="msg"></div>
+    </div>
+
+    <div>
+      <label>Reoon API key <span id="reoonConfigured2" class="hint"></span></label>
+      <div class="hint" style="margin-bottom:6px">
+        Optional. Verifies recipient addresses before send — importing and
+        launching work identically without it.
+      </div>
+      <input type="password" id="reoonKey2" placeholder="paste key">
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button id="btnSaveReoonKey2" class="secondary">Save key</button>
+      </div>
+      <div id="reoonStatus2" class="msg"></div>
+    </div>
+  </div>
 </div>
 
 <div class="card">
