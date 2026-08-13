@@ -704,52 +704,87 @@
     }).withFailureHandler(fail('monitorStatus')).sendTestAlert();
   };
 
-  // ── requests: waiting for your decision, and your own ──────────
-  function refreshPendingApprovals() {
+  // ── delegation: asking someone to let you send as them ─────────
+  let lastApprovalUrl = '';
+
+  $('btnRequestDelegation').onclick = function () {
+    const email = $('dgEmail').value.trim();
+    if (!email) { setMsg('dgStatus', 'Enter their email first.', 'bad'); return; }
+    google.script.run.withSuccessHandler(function (r) {
+      lastApprovalUrl = r.approvalUrl;
+      setMsg('dgStatus', 'Link ready for ' + r.delegatorEmail + '. Send them the message below.', 'good');
+      google.script.run.withSuccessHandler(function (text) {
+        $('dgInviteText').value = text;
+        $('dgInvite').style.display = '';
+        refreshDelegations();
+      }).withFailureHandler(fail('dgStatus')).delegationInviteText(r.id);
+    }).withFailureHandler(fail('dgStatus')).requestDelegation(email, $('dgDays').value, $('dgReason').value);
+  };
+
+  function copyText(text, label) {
+    navigator.clipboard.writeText(text).then(function () {
+      $('dgCopied').textContent = label + ' copied';
+      setTimeout(function () { $('dgCopied').textContent = ''; }, 2500);
+    });
+  }
+  $('btnCopyInvite').onclick = function () { copyText($('dgInviteText').value, 'Message'); };
+  $('btnCopyLink').onclick = function () { copyText(lastApprovalUrl, 'Link'); };
+
+  // Who you can actually send as — the question this tab exists to answer.
+  function refreshSenders() {
     google.script.run.withSuccessHandler(function (rows) {
-      const card = $('pendingApprovalsCard');
-      if (!rows.length) { card.style.display = 'none'; return; }
-      card.style.display = '';
-      $('pendingApprovalsList').innerHTML = rows.map(function (r, i) {
-        return '<div class="row" id="pending-' + i + '"><span><strong>' + esc(r.requestedBy) + '</strong>'
-          + '<div class="hint">' + esc(r.kind) + ' · ' + r.days + 'd' + (r.reason ? ' · ' + esc(r.reason) : '') + '</div></span>'
-          + '<span style="display:flex;gap:8px">'
-          + '<button class="tiny" onclick="decidePending(\'' + esc(r.id) + '\', true, ' + i + ')">Approve</button>'
-          + '<button class="tiny secondary" onclick="decidePending(\'' + esc(r.id) + '\', false, ' + i + ')">Deny</button>'
+      $('sendersList').innerHTML = rows.length ? rows.map(function (s) {
+        const chip = !s.canSend ? 'bad' : (s.daysLeft != null ? 'warn' : 'good');
+        const label = !s.canSend ? 'not available'
+          : (s.daysLeft != null ? s.daysLeft + ' day(s) left' : 'no expiry');
+        const how = s.approvedByThem
+          ? 'they approved this' + (s.approvedAt ? ' on ' + new Date(s.approvedAt).toLocaleDateString() : '')
+            + (s.approvalMode === 'per_campaign' ? ' · wants to see each campaign' : '')
+          : 'self-onboarded';
+        return '<div class="row"><span><strong>' + esc(s.displayName || s.email) + '</strong>'
+          + '<div class="hint">' + esc(s.email) + ' · ' + how + '</div></span>'
+          + '<span class="chip ' + chip + '">' + label + '</span></div>';
+      }).join('') : '<div class="empty">Nobody yet. Ask someone above.</div>';
+    }).withFailureHandler(function (err) {
+      $('sendersList').innerHTML = '<div class="msg bad">' + esc(clean(err.message)) + '</div>';
+    }).listAvailableSenders();
+  }
+  $('btnRefreshSenders').onclick = refreshSenders;
+  refreshSenders();
+
+  window.revokeDelegationRow = function (id, who) {
+    if (!confirm('Stop ' + who + ' being used as a sender, right now?\n\nGoing longer again means asking them for a fresh approval.')) return;
+    google.script.run.withSuccessHandler(function () {
+      refreshDelegations(); refreshSenders();
+    }).withFailureHandler(fail('dgStatus')).revokeDelegation(id);
+  };
+
+  function refreshDelegations() {
+    google.script.run.withSuccessHandler(function (rows) {
+      hideBar();
+      $('delegationsList').innerHTML = rows.length ? rows.map(function (r) {
+        const chip = r.live ? 'good' : (r.status === 'pending' ? 'warn' : (r.status === 'approved' ? '' : 'bad'));
+        const label = r.live ? r.daysLeft + 'd left' : r.status;
+        let sub = 'asked for ' + r.daysRequested + 'd';
+        if (r.status === 'pending') sub += ' · waiting on them';
+        if (r.daysApproved) sub += ' · they gave ' + r.daysApproved + 'd';
+        if (r.revokedBy) sub += ' · stopped by ' + r.revokedBy;
+        if (r.reason) sub += ' · ' + r.reason;
+        return '<div class="row"><span><strong>' + esc(r.delegatorEmail) + '</strong>'
+          + '<div class="hint">' + esc(sub) + '</div></span>'
+          + '<span style="display:flex;gap:8px;align-items:center">'
+          + '<span class="chip ' + chip + '">' + esc(label) + '</span>'
+          + (r.live ? '<button class="secondary tiny" onclick="revokeDelegationRow(\'' + esc(r.id) + '\', \'' + esc(r.delegatorEmail) + '\')">stop</button>' : '')
           + '</span></div>';
-      }).join('');
-    }).listPendingRequestsForMe();
+      }).join('') : '<div class="empty">No requests yet.</div>';
+    }).withFailureHandler(function (err) {
+      hideBar();
+      $('delegationsList').innerHTML = '<div class="msg bad">' + esc(clean(err.message)) + '</div>';
+    }).listDelegations();
   }
-  window.decidePending = function (id, approve, i) {
-    google.script.run.withSuccessHandler(function () {
-      setMsg('grantStatus', approve ? 'Approved.' : 'Denied.', 'good');
-      refreshPendingApprovals(); refreshGrants(); refreshSendingAccess();
-    }).withFailureHandler(fail('grantStatus')).decideAccessRequest(id, approve, '');
-  };
-  refreshPendingApprovals();
+  refreshDelegations();
 
-  function refreshMyRequests() {
-    google.script.run.withSuccessHandler(function (rows) {
-      $('myRequestsList').innerHTML = rows.length ? rows.map(function (r) {
-        const chip = r.status === 'approved' ? 'good' : r.status === 'denied' ? 'bad' : '';
-        return '<div class="row"><span>' + esc(r.kind) + ' · ' + r.days + 'd · ' + esc(r.approverEmail) + '</span>'
-          + '<span class="chip ' + chip + '">' + esc(r.status) + '</span></div>';
-      }).join('') : '<div class="hint">None yet.</div>';
-    }).listMyRequests();
-  }
-  refreshMyRequests();
-
-  $('btnSubmitRequest').onclick = function () {
-    const approver = $('reqApprover').value.trim();
-    if (!approver) { setMsg('requestStatus', 'Enter who should approve this.', 'bad'); return; }
-    google.script.run.withSuccessHandler(function () {
-      setMsg('requestStatus', 'Sent to ' + approver + '.', 'good');
-      $('reqApprover').value = ''; $('reqReason').value = '';
-      refreshMyRequests();
-    }).withFailureHandler(fail('requestStatus')).requestAccess($('reqKind').value, approver, $('reqDays').value, $('reqReason').value);
-  };
-
-  // ── access grants ─────────────────────────────────────────────
+  // ── console access ────────────────────────────────────────────
   $('btnGrantAccess').onclick = function () {
     const email = $('grantEmail').value.trim();
     const days = $('grantDays').value;
@@ -787,39 +822,6 @@
       .listAccessGrants();
   }
   $('btnRefreshGrants').onclick = refreshGrants;
-
-  // ── sending access (time-boxed) ─────────────────────────────
-  function refreshSendingAccess() {
-    google.script.run.withSuccessHandler(function (senders) {
-      $('sendingAccessList').innerHTML = senders.length ? senders.map(function (s) {
-        const chip = s.sendsExpired ? 'bad' : (s.sendsDaysLeft != null ? 'warn' : 'good');
-        const label = s.sendsExpired ? 'expired' : (s.sendsDaysLeft != null ? s.sendsDaysLeft + ' day(s) left' : 'permanent');
-        return '<div class="row"><span>' + esc(s.email)
-          + '<div class="hint">' + esc(s.displayName) + '</div></span>'
-          + '<span class="chip ' + chip + '">' + label + '</span></div>';
-      }).join('') : '<div class="empty">No senders onboarded yet.</div>';
-    }).senderStatus();
-  }
-  refreshSendingAccess();
-
-  $('btnSetSenderExpiry').onclick = function () {
-    const email = $('expirySenderEmail').value.trim();
-    const days = $('expiryDays').value;
-    if (!email) { setMsg('senderExpiryStatus', 'Enter a sender email first.', 'bad'); return; }
-    if (!days) { setMsg('senderExpiryStatus', 'Enter a number of days, or use "Make permanent" to clear an expiry.', 'bad'); return; }
-    google.script.run.withSuccessHandler(function (r) {
-      setMsg('senderExpiryStatus', r.email + ' can send through ' + new Date(r.expiresAt).toLocaleDateString() + '.', 'good');
-      refreshSendingAccess();
-    }).withFailureHandler(fail('senderExpiryStatus')).setSenderExpiry(email, days);
-  };
-  $('btnClearSenderExpiry').onclick = function () {
-    const email = $('expirySenderEmail').value.trim();
-    if (!email) { setMsg('senderExpiryStatus', 'Enter a sender email first.', 'bad'); return; }
-    google.script.run.withSuccessHandler(function () {
-      setMsg('senderExpiryStatus', email + ' set to permanent sending access.', 'good');
-      refreshSendingAccess();
-    }).withFailureHandler(fail('senderExpiryStatus')).setSenderExpiry(email, '');
-  };
 
   // ── shared chrome ─────────────────────────────────────────────
   function applyKillSwitch(on) {

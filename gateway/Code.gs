@@ -6,8 +6,16 @@
  *
  * Hand-picked whitelist, not "call any global function by name" — doPost
  * is reachable by anyone who can construct an HTTP request, so the attack
- * surface is exactly these six functions, each of which does its own
- * requireSender_ auth (AgentApi.gs) before touching the Store.
+ * surface is exactly the functions listed here, each of which does its own
+ * auth (AgentApi.gs) before touching the Store: requireSender_ for the
+ * steady-state calls, or the single-use claim token for the three
+ * delegation calls that necessarily run BEFORE a sender row exists.
+ *
+ * Adding a function to AgentApi.gs does not expose it — it has to be added
+ * here too. That is deliberate, and it is also easy to forget: the three
+ * delegation actions were written, deployed, and silently unreachable until
+ * a direct curl against the live endpoint returned "Unknown action". Worth
+ * remembering that a green unit suite proves nothing about this file.
  */
 const AGENT_API_ACTIONS = {
   registerSender: registerSender,
@@ -16,6 +24,12 @@ const AGENT_API_ACTIONS = {
   reportSent: reportSent,
   reportFailed: reportFailed,
   reportSignals: reportSignals,
+  // Delegated sending — see AgentApi.gs "Delegated sending" section.
+  lookupDelegation: lookupDelegation,
+  approveDelegation: approveDelegation,
+  denyDelegation: denyDelegation,
+  senderSelfStatus: senderSelfStatus,
+  revokeOwnDelegation: revokeOwnDelegation,
 };
 
 function doPost(e) {

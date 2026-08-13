@@ -65,17 +65,201 @@ function registerSender(email, secretPlain, displayName, timezone) {
     last_heartbeat: new Date(),
     secret_hash: sha256Hex_(secretPlain),
     consent_recorded_at: new Date(),
-    // Blank = permanent (today's default, unchanged). Time-boxing sending
-    // capability is deliberately an ADMIN action (admin/Access.gs
-    // setSenderExpiry), never something the registering agent declares about
-    // itself — gateway/ is ANYONE_ANONYMOUS (see this file's header), so a
-    // self-declared "days" here would let anyone grant themselves an
-    // arbitrary window. The exec authorizes once (real Google OAuth consent,
-    // unavoidable and correct); an admin separately controls how long that
-    // authorization is allowed to actually send for.
+    // Blank = permanent. This path is SELF-onboarding: someone in SENDER_POOL
+    // setting themselves up to send under their own name, where there is no
+    // third party whose permission is at stake. Delegated sending — an
+    // operator sending as someone else — never comes through here; it goes
+    // through approveDelegation below, which is the only path that writes a
+    // time-boxed sends_expire_at, and only ever from the delegator's own
+    // authenticated approval.
     sends_expire_at: '',
+    sends_granted_by: email, // themselves
   });
   logEvent_(email, 'onboard', { senderEmail: email, detail: { action: 'register' } });
+}
+
+/**
+ * ── Delegated sending ────────────────────────────────────────────────────
+ *
+ * The exec opens one link, lands on their own agent page (executeAs
+ * USER_ACCESSING, so Google has authenticated them and the page runs as
+ * them), and approves. These three functions are what that page calls.
+ *
+ * gateway/ is ANYONE_ANONYMOUS and therefore cannot verify the email the
+ * agent asserts. The claim token is what closes that: minted by
+ * admin/Delegation.gs, unguessable, delivered only to the delegator's own
+ * address, matched against the row's delegator_email, and burned on use. A
+ * caller without the token cannot act on a delegation at all; a caller with
+ * it can only act on the one delegation it belongs to, and only once.
+ *
+ * Worth being precise about what a stolen token would and would not buy:
+ * it could mark a delegation approved and register a sender row, but it
+ * could NOT send anything. Sending requires the delegator's own OAuth grant
+ * inside their own Google account, which no token can forge.
+ */
+function findDelegationByToken_(token) {
+  const clean = String(token || '').trim();
+  if (!clean) throw new Error('Missing approval token');
+  const rows = readRows_('Delegations', function (r) { return r.claim_token === clean; });
+  if (!rows.length) throw new Error('This approval link is not valid. Ask for a fresh one.');
+  return rows[0];
+}
+
+/** Checks the link belongs to whoever is actually signed in, so a forwarded link cannot be approved by the wrong person. */
+function requireDelegator_(row, assertedEmail) {
+  const asserted = String(assertedEmail || '').toLowerCase().trim();
+  if (asserted !== row.delegator_email) {
+    throw new Error('This approval was addressed to ' + row.delegator_email
+      + ', but you are signed in as ' + (asserted || 'nobody') + '.');
+  }
+}
+
+/** Read-only: what the exec sees before deciding. Does not burn the token. */
+function lookupDelegation(token, assertedEmail) {
+  const row = findDelegationByToken_(token);
+  requireDelegator_(row, assertedEmail);
+  return {
+    id: row.id,
+    requestedBy: row.requested_by,
+    daysRequested: row.days_requested,
+    reason: row.reason,
+    status: row.status,
+    createdAt: row.created_at,
+  };
+}
+
+/**
+ * The authorization itself. `days` is the delegator's own choice — it is NOT
+ * validated against days_requested, because the whole point is that the
+ * number is theirs to set. They may grant less than was asked for, and
+ * routinely should.
+ *
+ * mode 'blanket'      — the operator may send anything for the window
+ *      'per_campaign' — each campaign additionally needs their sign-off
+ *                       before it sends (admin/Campaign.gs approveCampaignAsExec)
+ */
+function approveDelegation(token, assertedEmail, secretPlain, days, mode, displayName, timezone) {
+  const row = findDelegationByToken_(token);
+  requireDelegator_(row, assertedEmail);
+  if (row.status !== 'pending') {
+    throw new Error('This request was already ' + row.status + '. Ask for a fresh link.');
+  }
+
+  const n = Math.floor(Number(days));
+  if (!isFinite(n) || n < 1 || n > 365) throw new Error('Days must be a whole number between 1 and 365');
+  if (mode !== 'blanket' && mode !== 'per_campaign') throw new Error('Unknown approval mode: ' + mode);
+
+  const email = row.delegator_email;
+  const expiresAt = new Date(Date.now() + n * 24 * 60 * 60 * 1000);
+  const existing = findRow_('Senders', email);
+
+  // Upsert, not insert: an exec re-approving after a window lapses is the
+  // normal case, and must not hit registerSender's "already registered" wall.
+  upsertRow_('Senders', {
+    email: email,
+    display_name: displayName || (existing && existing.display_name) || email.split('@')[0],
+    status: 'active',
+    ramp_start_date: (existing && existing.ramp_start_date) || new Date(),
+    daily_cap_override: (existing && existing.daily_cap_override) || '',
+    timezone: timezone || (existing && existing.timezone) || 'Asia/Kolkata',
+    agent_version: (existing && existing.agent_version) || '',
+    last_heartbeat: new Date(),
+    secret_hash: sha256Hex_(secretPlain),
+    consent_recorded_at: new Date(),
+    capabilities: (existing && existing.capabilities) || null,
+    sends_expire_at: expiresAt,
+    sends_granted_by: email, // themselves — the only value this may ever hold on this path
+  });
+
+  // Burn the token in the same step that grants the capability.
+  updateRow_('Delegations', row.id, {
+    claim_token: 'used:' + row.id,
+    status: 'approved',
+    days_approved: n,
+    approval_mode: mode,
+    decided_at: new Date(),
+  });
+
+  logEvent_(email, 'consent', {
+    senderEmail: email,
+    detail: { action: 'approve_delegation', delegationId: row.id, requestedBy: row.requested_by,
+      daysRequested: row.days_requested, daysApproved: n, mode: mode },
+  });
+
+  return { email: email, days: n, mode: mode, expiresAt: expiresAt.toISOString(), requestedBy: row.requested_by };
+}
+
+/** Declining is a first-class outcome, recorded as plainly as approval. Burns the token too — a "no" should not be re-openable by clicking the link again. */
+function denyDelegation(token, assertedEmail) {
+  const row = findDelegationByToken_(token);
+  requireDelegator_(row, assertedEmail);
+  if (row.status !== 'pending') throw new Error('This request was already ' + row.status + '.');
+
+  updateRow_('Delegations', row.id, {
+    claim_token: 'used:' + row.id, status: 'denied', decided_at: new Date(),
+  });
+  logEvent_(row.delegator_email, 'admin_action', {
+    senderEmail: row.delegator_email,
+    detail: { action: 'deny_delegation', delegationId: row.id, requestedBy: row.requested_by },
+  });
+  return { denied: true, requestedBy: row.requested_by };
+}
+
+/**
+ * What the delegator sees about their own account: is anything live, until
+ * when, how much has gone out under their name, and who is running it.
+ *
+ * Lending your name to someone else's outreach is only reasonable if you can
+ * see what went out. Without this the delegator's only options are to trust
+ * the operator completely or to trawl their own Sent folder, and the first
+ * one is not a security model.
+ */
+function senderSelfStatus(email, secret) {
+  const sender = requireSender_(email, secret);
+  const now = new Date();
+  const expiresAt = sender.sends_expire_at ? new Date(sender.sends_expire_at) : null;
+  const expired = !!expiresAt && expiresAt <= now;
+
+  const sent = readRows_('Queue', function (q) {
+    return q.sender_email === email && q.status === 'sent';
+  });
+  let lastSentAt = null;
+  sent.forEach(function (q) {
+    const t = q.sent_at ? new Date(q.sent_at) : null;
+    if (t && (!lastSentAt || t > lastSentAt)) lastSentAt = t;
+  });
+
+  // Who has been asking to use this name — shown so the delegator can spot an
+  // operator they did not expect, rather than only the aggregate count.
+  const operators = {};
+  readRows_('Delegations', function (r) { return r.delegator_email === email; })
+    .forEach(function (r) { operators[r.requested_by] = true; });
+
+  return {
+    canSend: sender.status === 'active' && !expired,
+    expiresAt: expiresAt ? expiresAt.toISOString() : null,
+    daysLeft: (!expired && expiresAt) ? Math.ceil((expiresAt - now) / 86400000) : null,
+    sentCount: sent.length,
+    lastSentAt: lastSentAt ? lastSentAt.toISOString() : null,
+    operators: Object.keys(operators),
+  };
+}
+
+/**
+ * Lets the delegator stop everything themselves, from their own page, with no
+ * admin in the loop. Authenticated by the sender secret their own agent holds
+ * — no claim token needed, since the token is long since burned by the time
+ * they might want this.
+ */
+function revokeOwnDelegation(email, secret) {
+  requireSender_(email, secret);
+  updateRow_('Senders', email, { sends_expire_at: new Date(0), status: 'revoked' });
+  readRows_('Delegations', function (r) { return r.delegator_email === email && r.status === 'approved'; })
+    .forEach(function (r) {
+      updateRow_('Delegations', r.id, { status: 'revoked', revoked_by: email, revoked_at: new Date() });
+    });
+  logEvent_(email, 'revoke', { senderEmail: email, detail: { action: 'revoke_own_delegation' } });
+  return { revoked: true };
 }
 
 /** True once a time-boxed sending grant has lapsed. Blank sends_expire_at means permanent — never expires. */
@@ -160,7 +344,7 @@ function pollDueJobs(email, secret) {
   const sender = requireSender_(email, secret);
   if (isKillSwitchOn_()) return [];
   if (sender.status !== 'active') return [];
-  if (senderSendingExpired_(sender)) return []; // time-boxed grant lapsed — see admin/Access.gs setSenderExpiry
+  if (senderSendingExpired_(sender)) return []; // the window the delegator approved has run out — see approveDelegation
 
   const capToday = capForSenderToday_(sender.ramp_start_date, new Date(), DAILY_CAP_RAMP, sender.daily_cap_override || null);
   const sentToday = sentTodayCountFor_(sender);

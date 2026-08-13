@@ -181,34 +181,110 @@ check('time-boxed sending access is admin-controlled, never self-declared by the
   if (!/heartbeat[\s\S]*?senderSendingExpired_/.test(src)) throw new Error('heartbeat does not derive expired status for the agent to see');
 });
 
-check('applySenderExpiry_ validates the day range and clears cleanly with a blank value', () => {
-  // The actual write logic (setSenderExpiry delegates to it, and so does the
-  // request-approval path in admin/Requests.gs) — see admin/Access.gs's
-  // header comment for why the write is split from the two ways to reach it.
-  const src = readFileSync('admin/Access.gs', 'utf8');
-  const fn = src.match(/function applySenderExpiry_[\s\S]*?\n\}/);
-  if (!fn) throw new Error('applySenderExpiry_ not found');
-  if (!/n < 1 \|\| n > 365/.test(fn[0])) throw new Error('day range is not bounded 1-365');
-  if (!/sends_expire_at: ''/.test(fn[0])) throw new Error('a blank days value does not clear the expiry');
+// ── The delegation invariant ────────────────────────────────────────────
+// The tool exists so an operator can send as a senior exec without holding
+// that exec's credentials. Every check below defends one property of that:
+// the exec, and only the exec, decides whether and for how long. An earlier
+// build let an admin type someone else's window into a form, which inverted
+// the whole premise — these exist so that cannot come back by accident.
+
+check('no admin-side code can set or extend how long someone else\'s name may be used', () => {
+  const adminSrc = readdirSync('admin').filter(f => f.endsWith('.gs'))
+    .map(f => `/* FILE:${f} */\n` + readFileSync(`admin/${f}`, 'utf8')).join('\n');
+  // revokeDelegation legitimately writes sends_expire_at — but only ever to
+  // new Date(0), i.e. the past. Anything computing a FUTURE expiry admin-side
+  // would be an operator granting themselves time, which is the whole bug.
+  const futureExpiry = /sends_expire_at:\s*(?!new Date\(0\))(?!''\s*[,}])[^,\n]*(?:Date\.now\(\)|expiresAt|\+\s*n\b)/;
+  if (futureExpiry.test(adminSrc))
+    throw new Error('admin/ computes a future sends_expire_at — only the delegator\'s own approval (gateway approveDelegation) may do that');
+  if (/function setSenderExpiry\b/.test(adminSrc))
+    throw new Error('setSenderExpiry is back: an operator must never be able to type in someone else\'s window');
 });
 
-check('request/approval: only the named approver can decide, never the requester, never a bystander admin', () => {
-  const src = readFileSync('admin/Requests.gs', 'utf8');
-  if (!/requireRequestApprover_/.test(src)) throw new Error('decideAccessRequest has no per-request approver check');
-  const guard = src.match(/function requireRequestApprover_[\s\S]*?\n\}/);
-  if (!guard || !/approver_email/.test(guard[0]))
-    throw new Error('the approver check does not compare against the request\'s own approver_email — it would accept any admin instead of specifically the named approver');
-  if (!/approver === requester/.test(src)) throw new Error('requestAccess does not block naming yourself as your own approver');
+check('approveDelegation records the delegator themselves as the grantor, never the requester', () => {
+  const src = readFileSync('gateway/AgentApi.gs', 'utf8');
+  const fn = src.match(/function approveDelegation[\s\S]*?\n\}/);
+  if (!fn) throw new Error('approveDelegation not found');
+  if (!/sends_granted_by:\s*email/.test(fn[0]))
+    throw new Error('sends_granted_by is not set to the delegator\'s own email — the audit trail would credit the wrong person for the decision');
+  if (/sends_granted_by:\s*(row\.requested_by|requestedBy)/.test(fn[0]))
+    throw new Error('sends_granted_by is set to the REQUESTER — that is precisely the inversion this tool exists to prevent');
 });
 
-check('a request is applied before being marked approved, so a failed grant cannot leave a stuck "approved" row', () => {
-  const src = readFileSync('admin/Requests.gs', 'utf8');
-  const fn = src.match(/function decideAccessRequest[\s\S]*?\n\}/);
-  if (!fn) throw new Error('decideAccessRequest not found');
-  const applyIdx = fn[0].search(/applyAccessGrant_|applySenderExpiry_/);
-  const statusIdx = fn[0].indexOf("status: approve ? 'approved'");
-  if (applyIdx === -1 || statusIdx === -1 || applyIdx > statusIdx)
-    throw new Error('the grant is applied after the status write, not before — a mid-flight failure would leave the request stuck "approved" with nothing actually granted');
+check('the claim token is single-use: burned on both approve and deny', () => {
+  const src = readFileSync('gateway/AgentApi.gs', 'utf8');
+  ['approveDelegation', 'denyDelegation'].forEach(name => {
+    const fn = src.match(new RegExp('function ' + name + '[\\s\\S]*?\\n\\}'));
+    if (!fn) throw new Error(name + ' not found');
+    if (!/claim_token:\s*'used:'/.test(fn[0]))
+      throw new Error(name + ' does not burn the claim token — the approval link would stay replayable after use');
+    if (!/status !== 'pending'/.test(fn[0]))
+      throw new Error(name + ' does not re-check status, so a double-click could decide an already-decided request');
+  });
+});
+
+check('a delegation can only be decided by the person it was addressed to', () => {
+  const src = readFileSync('gateway/AgentApi.gs', 'utf8');
+  const guard = src.match(/function requireDelegator_[\s\S]*?\n\}/);
+  if (!guard) throw new Error('requireDelegator_ not found');
+  if (!/row\.delegator_email/.test(guard[0]))
+    throw new Error('the guard does not compare against the row\'s own delegator_email — a forwarded link could be approved by the wrong person');
+  ['lookupDelegation', 'approveDelegation', 'denyDelegation'].forEach(name => {
+    const fn = src.match(new RegExp('function ' + name + '[\\s\\S]*?\\n\\}'));
+    if (!fn || !/requireDelegator_\(/.test(fn[0])) throw new Error(name + ' does not call requireDelegator_');
+  });
+});
+
+check('every public gateway API function is actually routable from doPost', () => {
+  // AgentApi.gs defining a function does not expose it — gateway/Code.gs's
+  // AGENT_API_ACTIONS whitelist is what makes it callable, and the two drift
+  // silently. All three delegation endpoints shipped unreachable exactly this
+  // way: deployed, unit-green, and answering "Unknown action" to every real
+  // call until a direct curl against the live endpoint caught it.
+  const api = readFileSync('gateway/AgentApi.gs', 'utf8');
+  const router = readFileSync('gateway/Code.gs', 'utf8');
+  const table = router.match(/const AGENT_API_ACTIONS = \{[\s\S]*?\n\};/);
+  if (!table) throw new Error('AGENT_API_ACTIONS not found in gateway/Code.gs');
+
+  const exposed = new Set([...table[0].matchAll(/^\s*(\w+):/gm)].map(m => m[1]));
+  const defined = extractFunctions_(api).map(f => f.name).filter(n => !n.endsWith('_'));
+  const unroutable = defined.filter(n => !exposed.has(n));
+  if (unroutable.length)
+    throw new Error('defined in AgentApi.gs but missing from AGENT_API_ACTIONS, so unreachable: ' + unroutable.join(', '));
+
+  const dangling = [...exposed].filter(n => !defined.includes(n));
+  if (dangling.length)
+    throw new Error('routed in AGENT_API_ACTIONS but not defined in AgentApi.gs, so doPost would throw: ' + dangling.join(', '));
+});
+
+check('an operator cannot name themselves as their own delegator', () => {
+  const src = readFileSync('admin/Delegation.gs', 'utf8');
+  if (!/delegator === requester/.test(src))
+    throw new Error('requestDelegation does not block asking yourself — that would be a self-grant with extra steps');
+});
+
+// ── Multi-tenancy ───────────────────────────────────────────────────────
+// One agent deployment serves every delegator (executeAs USER_ACCESSING +
+// access DOMAIN). That is what lets a CTO approve by opening a link instead
+// of being onboarded onto a platform — and it means anything keyed to "this
+// person" must live in UserProperties. ScriptProperties is one shared store:
+// putting a sender secret there made each new delegator silently clobber the
+// last one, and both then failed to authenticate.
+
+check('the agent web app is reachable by the whole domain, not just its owner', () => {
+  const manifest = JSON.parse(readFileSync('agent/appsscript.json', 'utf8'));
+  if (manifest.webapp.access !== 'DOMAIN')
+    throw new Error('agent webapp access is "' + manifest.webapp.access + '" — a delegator could not open their own approval link');
+  if (manifest.webapp.executeAs !== 'USER_ACCESSING')
+    throw new Error('agent webapp executeAs is "' + manifest.webapp.executeAs + '" — it must run as the visitor for their approval to be their own act');
+});
+
+check('no per-person agent state is kept in the shared ScriptProperties store', () => {
+  readdirSync('agent').filter(f => f.endsWith('.gs')).forEach(f => {
+    const src = readFileSync(`agent/${f}`, 'utf8');
+    if (/getScriptProperties\(\)/.test(src))
+      throw new Error(`agent/${f} uses getScriptProperties() — that store is shared across every delegator using this deployment; use userProps_() instead`);
+  });
 });
 
 check('only admin/Store.gs (and its synced copy) may reference SpreadsheetApp', () => {
@@ -396,41 +472,39 @@ check('every public admin function (no trailing _) calls requireAdmin_(), except
   // The sender-facing API (AgentApi.gs) lives entirely in gateway/ now, not
   // here — it's checked separately, by requireSender_(), not requireAdmin_().
   //
-  // requestAccess/listMyRequests and listPendingRequestsForMe/decideAccessRequest
-  // (admin/Requests.gs) are the whole point of the request/approval flow being
-  // reachable WITHOUT prior admin access — see that file's header comment. They
-  // are gated instead by requireDomainUser_() (any @domain sign-in) or, for
-  // decideAccessRequest, requireRequestApprover_() (must literally be the email
-  // the request names as approver). Exempting them from requireAdmin_() here is
-  // correct; the assertion below instead pins that they still call ONE of those
-  // narrower guards, so this isn't a silent "no auth at all" exemption.
-  const EXEMPT = new Set(['doGet', 'approveCampaignAsExec',
-    'requestAccess', 'listMyRequests', 'listPendingRequestsForMe', 'decideAccessRequest']);
-  const REQUEST_FLOW_GUARDS = new Set(['requestAccess', 'listMyRequests', 'listPendingRequestsForMe', 'decideAccessRequest']);
+  // The delegator-facing flow deliberately does NOT live here — it runs on
+  // the agent, as the delegator, so there is nothing in admin/ to exempt.
+  const EXEMPT = new Set(['doGet', 'approveCampaignAsExec']);
   const adminFiles = readdirSync('admin').filter(f => f.endsWith('.gs'));
   const src = adminFiles.map(f => readFileSync(`admin/${f}`, 'utf8')).join('\n');
   const fns = extractFunctions_(src);
   const unguarded = fns.filter(f =>
     !f.name.endsWith('_') && !EXEMPT.has(f.name) && !f.body.includes('requireAdmin_('));
   if (unguarded.length) throw new Error('missing requireAdmin_() in: ' + unguarded.map(f => f.name).join(', '));
-
-  const looselyGuarded = fns.filter(f => REQUEST_FLOW_GUARDS.has(f.name)
-    && !f.body.includes('requireDomainUser_(') && !f.body.includes('requireRequestApprover_('));
-  if (looselyGuarded.length)
-    throw new Error('exempted from requireAdmin_() but calls neither requireDomainUser_() nor requireRequestApprover_() in: '
-      + looselyGuarded.map(f => f.name).join(', '));
 });
 
-check('every function in gateway/AgentApi.gs is sender-gated by requireSender_(), except registerSender', () => {
-  // registerSender is the one deliberate exception: there is no existing Senders
-  // row to check a secret against yet — the freshly-generated secret itself is
-  // what proves legitimacy (see the function's own comment for the full reasoning).
-  const EXEMPT = new Set(['registerSender']);
+check('every function in gateway/AgentApi.gs is sender-gated by requireSender_(), except the pre-registration paths', () => {
+  // Two kinds of deliberate exception, both for the same structural reason:
+  // there is no Senders row to check a secret against yet.
+  //
+  //   registerSender  — self-onboarding; the freshly-generated secret itself
+  //                     is what proves legitimacy, guarded by SENDER_POOL.
+  //   lookup/approve/denyDelegation — the delegator has not been registered
+  //                     yet; approving is what registers them. Guarded by the
+  //                     single-use claim token instead, which is asserted
+  //                     below rather than merely assumed.
+  const TOKEN_GATED = new Set(['lookupDelegation', 'approveDelegation', 'denyDelegation']);
+  const EXEMPT = new Set(['registerSender', ...TOKEN_GATED]);
   const src = readFileSync('gateway/AgentApi.gs', 'utf8');
   const fns = extractFunctions_(src);
   const unguarded = fns.filter(f =>
     !f.name.endsWith('_') && !EXEMPT.has(f.name) && !f.body.includes('requireSender_('));
   if (unguarded.length) throw new Error('missing sender auth in: ' + unguarded.map(f => f.name).join(', '));
+
+  const tokenless = fns.filter(f => TOKEN_GATED.has(f.name)
+    && !(f.body.includes('findDelegationByToken_(') && f.body.includes('requireDelegator_(')));
+  if (tokenless.length)
+    throw new Error('exempt from requireSender_() but not actually token-gated: ' + tokenless.map(f => f.name).join(', '));
 });
 
 /** Loads shared/Csv.gs + shared/Schedule.gs, stubbing Utilities.formatDate via real Intl timezone conversion. */

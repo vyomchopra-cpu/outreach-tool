@@ -1,0 +1,300 @@
+<!--
+  The delegator-facing page. Likely the only screen of this tool a senior exec
+  will ever see, possibly on a phone, probably in under a minute — so it says
+  exactly what is being asked, what it does not grant, and how to stop it,
+  and nothing else.
+-->
+<style>
+  :root {
+    --ink: #14191c; --muted: #5b6b70; --paper: #f6f8f8; --panel: #fff;
+    --line: #dfe6e5; --accent: #0e7c86; --accent-soft: #e4f2f2;
+    --good: #1c8558; --good-soft: #e6f4ed; --bad: #b93a31;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #e8eded; --muted: #94a4a5; --paper: #0d1315; --panel: #161e20;
+      --line: #263030; --accent: #55d6dc; --accent-soft: #16302f;
+      --good: #4fc590; --good-soft: #12302400; --bad: #ea7a72;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 15px; line-height: 1.6; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 560px; margin: 0 auto; padding: 32px 20px 64px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 24px; margin-bottom: 16px;
+  }
+  h1 { font-size: 21px; margin: 0 0 6px; letter-spacing: -0.01em; text-wrap: balance; }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  p { margin: 10px 0; }
+  .muted { color: var(--muted); font-size: 13.5px; }
+  .ask {
+    background: var(--accent-soft); border-radius: 10px; padding: 16px 18px; margin: 16px 0;
+  }
+  .ask .who { font-size: 17px; font-weight: 600; }
+  .reason { margin-top: 8px; font-style: italic; }
+  label { display: block; font-size: 13px; font-weight: 600; margin: 18px 0 6px; }
+  input[type=text], input[type=number] {
+    width: 100%; padding: 10px 12px; font-size: 15px; color: var(--ink);
+    background: var(--paper); border: 1px solid var(--line); border-radius: 8px;
+  }
+  input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .modes { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+  .mode {
+    display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px;
+    border: 1px solid var(--line); border-radius: 9px; cursor: pointer;
+  }
+  .mode.sel { border-color: var(--accent); background: var(--accent-soft); }
+  .mode input { margin-top: 4px; flex: none; }
+  .mode b { font-size: 14px; }
+  .mode span { display: block; font-size: 12.5px; color: var(--muted); }
+  .row { display: flex; gap: 10px; margin-top: 24px; }
+  button {
+    flex: 1; padding: 13px 16px; font-size: 15px; font-weight: 600; font-family: inherit;
+    border-radius: 9px; border: 1px solid transparent; cursor: pointer;
+    background: var(--accent); color: #fff;
+  }
+  button.ghost { background: transparent; color: var(--muted); border-color: var(--line); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .fineprint { font-size: 12.5px; color: var(--muted); margin-top: 18px; }
+  .fineprint li { margin: 5px 0; }
+  .err { color: var(--bad); font-size: 13.5px; margin-top: 12px; }
+  .ok-badge {
+    display: inline-block; background: var(--good-soft); color: var(--good);
+    border: 1px solid currentColor; border-radius: 20px;
+    padding: 3px 12px; font-size: 12.5px; font-weight: 600;
+  }
+  .filter {
+    border: 1px solid var(--line); border-radius: 9px; padding: 13px 15px; margin-top: 10px;
+  }
+  .filter code {
+    display: block; margin-top: 6px; padding: 8px 10px; background: var(--paper);
+    border-radius: 6px; font-size: 12.5px; word-break: break-all;
+  }
+  .spinner { text-align: center; color: var(--muted); padding: 40px 0; }
+  [hidden] { display: none !important; }
+</style>
+
+<div class="wrap">
+  <div id="loading" class="spinner">Loading…</div>
+
+  <!-- ── The ask ─────────────────────────────────────── -->
+  <div id="askView" hidden>
+    <div class="card">
+      <h1>Approve sending from your account?</h1>
+      <p class="muted">Signed in as <b id="myEmail"></b></p>
+
+      <div class="ask">
+        <div class="who" id="askWho"></div>
+        <div>would like to send emails that go out under your name.</div>
+        <div class="reason muted" id="askReason" hidden></div>
+      </div>
+
+      <p><b>Nothing has been authorized yet.</b> Google asked for permission to
+      send mail as you a moment ago — that only installed the tool. It cannot
+      send anything until you approve below, and it stops on its own when the
+      days you pick run out.</p>
+
+      <label for="dispName">Your name, as recipients will see it</label>
+      <input type="text" id="dispName">
+
+      <label for="days">How many days?</label>
+      <input type="number" id="days" min="1" max="365">
+      <div class="muted" id="daysHint"></div>
+
+      <label>How much do you want to see?</label>
+      <div class="modes">
+        <label class="mode sel" id="modeBlanketLabel">
+          <input type="radio" name="mode" value="blanket" checked>
+          <span><b>Just get on with it</b>
+          <span>They can send campaigns without checking back with you.</span></span>
+        </label>
+        <label class="mode" id="modePerLabel">
+          <input type="radio" name="mode" value="per_campaign">
+          <span><b>Show me each campaign first</b>
+          <span>Nothing sends until you have seen that specific campaign and approved it.</span></span>
+        </label>
+      </div>
+
+      <div class="row">
+        <button id="btnApprove">Approve</button>
+        <button id="btnDeny" class="ghost">Decline</button>
+      </div>
+      <div id="askErr" class="err" hidden></div>
+
+      <ul class="fineprint">
+        <li>This tool can send mail as you. It <b>cannot read your inbox</b>.</li>
+        <li>Every message appears in your own Sent folder, as normal mail.</li>
+        <li>You can stop it instantly, from this page, at any time.</li>
+        <li>You can also remove it entirely at <span class="muted">myaccount.google.com/permissions</span>.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ── Approved ────────────────────────────────────── -->
+  <div id="doneView" hidden>
+    <div class="card">
+      <span class="ok-badge">Approved</span>
+      <h1 style="margin-top:12px">You're all set</h1>
+      <p id="doneSummary"></p>
+      <p class="muted">Sending stops automatically after that. You don't need
+      to do anything to end it.</p>
+      <div class="row">
+        <button id="btnRevoke" class="ghost">Stop sending now</button>
+      </div>
+      <div id="doneErr" class="err" hidden></div>
+    </div>
+
+    <div class="card" id="filterCard">
+      <h2>See replies as they come in</h2>
+      <p class="muted">Optional, about five minutes. Replies to these campaigns
+      land in your inbox like any other mail — these filters just group them so
+      they're easy to find. In Gmail: <b>Settings → Filters and Blocked
+      Addresses → Create a new filter</b>.</p>
+      <div id="filterList"></div>
+    </div>
+  </div>
+
+  <!-- ── Declined ────────────────────────────────────── -->
+  <div id="deniedView" hidden>
+    <div class="card">
+      <h1>Declined</h1>
+      <p id="deniedSummary"></p>
+      <p class="muted">Nothing was authorized and nothing can be sent under
+      your name. You can close this page.</p>
+    </div>
+  </div>
+
+  <!-- ── Error ───────────────────────────────────────── -->
+  <div id="errView" hidden>
+    <div class="card">
+      <h1>This link didn't work</h1>
+      <p id="errMsg" class="err"></p>
+      <p class="muted">Approval links are single-use and are tied to one
+      person. Ask whoever sent it to generate a fresh one.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+  var TOKEN = <?= JSON.stringify(token) ?>;
+
+  function $(id) { return document.getElementById(id); }
+  function show(id) {
+    ['loading', 'askView', 'doneView', 'deniedView', 'errView'].forEach(function (v) {
+      $(v).hidden = (v !== id);
+    });
+  }
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+  function fail(elId) {
+    return function (e) {
+      var el = $(elId);
+      el.textContent = e.message || String(e);
+      el.hidden = false;
+      document.querySelectorAll('button').forEach(function (b) { b.disabled = false; });
+    };
+  }
+
+  google.script.run
+    .withSuccessHandler(function (d) {
+      $('myEmail').textContent = d.myEmail;
+      $('askWho').textContent = d.requestedByName;
+      $('dispName').value = d.suggestedName;
+      $('days').value = d.daysRequested;
+      $('daysHint').textContent = d.requestedByName + ' asked for ' + d.daysRequested
+        + '. Set whatever you\'re comfortable with — it\'s your call.';
+      if (d.reason) {
+        $('askReason').textContent = '“' + d.reason + '”';
+        $('askReason').hidden = false;
+      }
+      show('askView');
+    })
+    .withFailureHandler(function (e) {
+      $('errMsg').textContent = e.message || String(e);
+      show('errView');
+    })
+    .getDelegationForApproval(TOKEN);
+
+  document.querySelectorAll('.mode input').forEach(function (r) {
+    r.onchange = function () {
+      $('modeBlanketLabel').classList.toggle('sel', $('modeBlanketLabel').querySelector('input').checked);
+      $('modePerLabel').classList.toggle('sel', $('modePerLabel').querySelector('input').checked);
+    };
+  });
+
+  $('btnApprove').onclick = function () {
+    var days = parseInt($('days').value, 10);
+    if (!(days >= 1 && days <= 365)) {
+      return fail('askErr')({ message: 'Pick a number of days between 1 and 365.' });
+    }
+    document.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+    $('btnApprove').textContent = 'Approving…';
+    var mode = document.querySelector('.mode input:checked').value;
+
+    google.script.run
+      .withSuccessHandler(function (r) {
+        var until = new Date(r.expiresAt).toLocaleDateString(undefined,
+          { weekday: 'long', day: 'numeric', month: 'long' });
+        $('doneSummary').innerHTML = '<b>' + esc(r.requestedByName) + '</b> can send emails under your '
+          + 'name for the next <b>' + r.days + ' day' + (r.days === 1 ? '' : 's') + '</b> — until <b>'
+          + esc(until) + '</b>.'
+          + (r.mode === 'per_campaign'
+            ? ' You\'ll be asked to approve each campaign before it goes out.'
+            : '');
+        if (r.filters === 'created automatically') {
+          $('filterCard').hidden = true;
+        } else {
+          $('filterList').innerHTML = r.filterSpec.map(function (f) {
+            return '<div class="filter"><b>Label: ' + esc(f.label) + '</b>'
+              + '<div class="muted" style="font-size:12.5px">' + esc(f.why) + '</div>'
+              + '<code>' + esc(f.criterion) + '</code>'
+              + '<div class="muted" style="font-size:12.5px;margin-top:6px">Then tick: '
+              + f.actions.map(esc).join(', ') + '</div></div>';
+          }).join('');
+        }
+        show('doneView');
+      })
+      .withFailureHandler(function (e) {
+        $('btnApprove').textContent = 'Approve';
+        fail('askErr')(e);
+      })
+      .approveDelegationFromPage(TOKEN, days, mode, $('dispName').value, null);
+  };
+
+  $('btnDeny').onclick = function () {
+    document.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+    google.script.run
+      .withSuccessHandler(function (r) {
+        $('deniedSummary').textContent = r.requestedByName
+          + ' has not been given permission to send under your name.';
+        show('deniedView');
+      })
+      .withFailureHandler(fail('askErr'))
+      .denyDelegationFromPage(TOKEN);
+  };
+
+  $('btnRevoke').onclick = function () {
+    $('btnRevoke').disabled = true;
+    $('btnRevoke').textContent = 'Stopping…';
+    google.script.run
+      .withSuccessHandler(function () {
+        $('doneSummary').innerHTML = '<b>Stopped.</b> Nothing further can be sent under your name.';
+        $('btnRevoke').hidden = true;
+        $('filterCard').hidden = true;
+      })
+      .withFailureHandler(function (e) {
+        $('btnRevoke').disabled = false;
+        $('btnRevoke').textContent = 'Stop sending now';
+        fail('doneErr')(e);
+      })
+      .revokeMyDelegation();
+  };
+</script>

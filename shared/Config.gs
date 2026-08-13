@@ -57,15 +57,22 @@ const ADMIN_ALLOWLIST = [
 const CENTRAL_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbyLM5Wyr9S_isiYbk1MPMKT3XMzjgg9r6pXBXKIQhbz7xlnScOVZwnaK14jX9DZTunA/exec';
 
 /**
- * The pilot agent's own web app URL. Surfaced in the console's Operations tab
- * so onboarding, diagnostics, and the manual filter guide are reachable from
- * one place instead of being pasted around. Each exec gets their own agent
- * project and therefore their own URL — once there is more than one, this
- * becomes a field on the Senders row rather than a single constant.
+ * The agent web app — ONE deployment, shared by everyone.
+ *
+ * It is deployed executeAs USER_ACCESSING + access DOMAIN, so each visitor
+ * runs as themselves with their own OAuth grant, their own trigger, and their
+ * own UserProperties. That is what makes delegation possible at all: a CTO
+ * lends their name by opening this URL, not by being given a copy of the
+ * project. (It used to be one project per exec, which is why this comment
+ * previously said the opposite — that design is what forced an admin to type
+ * other people's permissions in on their behalf.)
+ *
+ * admin/Delegation.gs appends ?approve=<token> to this to build the single
+ * link a delegator receives.
  */
 const AGENT_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbxP0ae8lcMhVYJg4dp5VeSYZAr7_benBZ3zF4CTTFGTyZAA2RhkwD9u-9epCZpGmqkt/exec';
 
-/** The admin console's own URL — used by admin/Requests.gs to link a Chat notification straight to the decision page. */
+/** The admin console's own URL — used in operator-facing alerts so a notification links straight to the console. */
 const ADMIN_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbzkVMxLpWszLRqL9ec9M3LNI0wRUtTAwadZ6eEoHxoQWuia_B6XEiObHlT5Smq3bsY/exec';
 
 /**
@@ -88,7 +95,7 @@ const ADMIN_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbzkVMxLpWszLRq
 const REOON_API_KEY = '';
 const REOON_MODE = 'quick';
 
-const AGENT_VERSION = '0.11.0'; // bump alongside package.json's version — see docs/RELEASE_PROCESS.md
+const AGENT_VERSION = '0.12.0'; // bump alongside package.json's version — see docs/RELEASE_PROCESS.md
 
 /**
  * Which send path the agent uses — see agent/Transport.gs.

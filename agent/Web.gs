@@ -1,12 +1,19 @@
 /**
- * Not a real web app — this agent has no UI for day-to-day use. It exists so
- * one-time and occasional actions are reachable by URL instead of through the
- * Apps Script editor's Run button, which proved unreliable for a fresh project
- * in this environment.
+ * Two audiences, one deployment.
  *
- * Deployed access:MYSELF, so every route here is reachable only by the account
- * that owns the agent. That is the entire authorization model for this file —
- * there is deliberately nothing here that another user could reach.
+ * Deployed access:DOMAIN + executeAs USER_ACCESSING, so every visitor runs as
+ * THEMSELVES with their own OAuth grant, their own trigger, and their own
+ * UserProperties (see agent/CentralClient.gs userProps_). One deployment
+ * therefore serves every exec who delegates sending — nobody has to be given
+ * their own copy of this project, which is the entire point: a CTO can lend
+ * their name by opening a link, not by being onboarded onto a platform.
+ *
+ * It was access:MYSELF until that was understood, which is why the tool used
+ * to require an admin to type someone else's permissions in on their behalf.
+ *
+ *   ?approve=<token>  the delegator's own approval page — the important one
+ *   (no parameter)    whoever is signed in, looking at their own state
+ *   ?diagnose / ?setup / ?testsend / ?onboard / ?disconnect  operator tools
  */
 function doGet(e) {
   const email = getMyEmail_();
@@ -15,6 +22,14 @@ function doGet(e) {
   }
 
   const p = e.parameter || {};
+
+  if (p.approve) {
+    const t = HtmlService.createTemplateFromFile('ui/Approve');
+    t.token = p.approve;
+    return t.evaluate()
+      .setTitle('Approve sending — MIS Outreach')
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  }
 
   if (p.diagnose === '1') {
     return html_(renderDiagnosticsHtml_(runDiagnostics_()));

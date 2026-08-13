@@ -83,7 +83,7 @@ function ensureAgentTrigger_() {
   if (allowed.indexOf(AGENT_POLL_MINUTES) === -1) {
     throw new Error('AGENT_POLL_MINUTES must be one of ' + allowed.join(', ') + ', got ' + AGENT_POLL_MINUTES);
   }
-  const props = PropertiesService.getScriptProperties();
+  const props = userProps_(); // per-exec: each delegator owns their own trigger
   const desired = String(AGENT_POLL_MINUTES);
   const existing = ScriptApp.getProjectTriggers().filter(function (t) {
     return t.getHandlerFunction() === 'tick';

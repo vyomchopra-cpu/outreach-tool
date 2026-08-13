@@ -1,49 +1,73 @@
 <!--
-  Time-boxed access. Included by ui/Index.html.
-  The person being granted access must sign in at the console URL first —
-  Apps Script's own DOMAIN-restricted deployment handles that automatically,
-  there is nothing to configure for it. What this panel controls is whether
-  their sign-in is then authorized, and for how long.
--->
-<div class="card" id="pendingApprovalsCard" style="display:none">
-  <h2><span class="num">🔔</span> Waiting for your decision</h2>
-  <div class="hint">Someone named you as approver on a request. Only your own sign-in can act on these — that's what makes them trustworthy.</div>
-  <div id="pendingApprovalsList" style="margin-top:10px"></div>
-</div>
+  One question, answered top to bottom: who can I send mail as, and until when.
 
+  This tab used to mix four things — console grants, sending expiry, requests,
+  approvals — and the sending-expiry box let an operator type in how many days
+  someone ELSE's name could be used, which is exactly backwards. That box is
+  gone. Days are set by the delegator on their own page and can only be
+  shortened from here, never extended.
+-->
 <div class="card">
-  <h2><span class="num">✎</span> Request access from someone else</h2>
+  <h2><span class="num">✉</span> Send on behalf of someone</h2>
   <div class="hint">
-    Rather than granting yourself something and writing "approved by X" in a
-    note, ask the actual person — they get their own decision link, and
-    nothing is granted until they act on it themselves.
+    Ask a colleague to let campaigns go out under their name. They get one
+    link, sign in as themselves, choose how many days, and approve. You never
+    see their inbox and they never install anything.
   </div>
   <div class="cols">
     <div>
-      <label>What</label>
-      <select id="reqKind">
-        <option value="console">Console access</option>
-        <option value="sending">Sending access (my own name)</option>
-      </select>
-      <label>Approve by</label>
-      <input type="text" id="reqApprover" placeholder="their.email@moveinsync.com">
-      <label>Days</label>
-      <input type="number" id="reqDays" min="1" max="365" value="14">
-      <label>Reason</label>
-      <input type="text" id="reqReason" placeholder="Covering the outreach launch this week">
-      <button id="btnSubmitRequest" class="secondary">Submit request</button>
-      <div id="requestStatus" class="msg"></div>
+      <label>Their email</label>
+      <input type="text" id="dgEmail" placeholder="name@moveinsync.com">
+      <label>Days to ask for <span class="hint">they can change this</span></label>
+      <input type="number" id="dgDays" min="1" max="365" value="14">
+      <label>What it's for <span class="hint">they'll see this</span></label>
+      <input type="text" id="dgReason" placeholder="Q3 enterprise outreach, ~120 prospects">
+      <button id="btnRequestDelegation">Create approval link</button>
+      <div id="dgStatus" class="msg"></div>
     </div>
-    <div>
-      <label>Your requests</label>
-      <div id="myRequestsList" class="hint">Loading…</div>
+    <div class="hint" style="padding-top:26px">
+      Sending stops on its own when their window closes — nobody has to
+      remember to switch it off. To go longer, ask again; there is
+      deliberately no way to extend someone's window from this console.
+    </div>
+  </div>
+
+  <div id="dgInvite" style="display:none;margin-top:18px">
+    <label>Send them this</label>
+    <textarea id="dgInviteText" rows="12" readonly
+      style="width:100%;font-family:inherit;font-size:13px;line-height:1.55"></textarea>
+    <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+      <button id="btnCopyInvite" class="secondary">Copy message</button>
+      <button id="btnCopyLink" class="secondary">Copy link only</button>
+      <span id="dgCopied" class="hint"></span>
+    </div>
+    <div class="hint" style="margin-top:8px">
+      Google shows a permission prompt before our page can explain itself, so
+      send the whole message rather than a bare link — a CTO who meets an
+      unexplained consent screen will close the tab.
     </div>
   </div>
 </div>
 
 <div class="card">
-  <h2><span class="num">⏱</span> Grant access</h2>
-  <div class="hint">Full console access — build and launch campaigns, not just view — for a fixed number of days. Internal @<span id="replyToDomainSpan">…</span> addresses only. They sign in at this same URL; nothing needs sending to them beyond the link.</div>
+  <h2><span class="num">▤</span> Who you can send as</h2>
+  <button id="btnRefreshSenders" class="secondary">Refresh</button>
+  <div id="sendersList" style="margin-top:10px">Loading…</div>
+</div>
+
+<div class="card">
+  <h2><span class="num">◷</span> Approval history</h2>
+  <div class="hint">Every ask, what they granted, and who cut it short. Nothing here is editable — it's the record.</div>
+  <div id="delegationsList" style="margin-top:10px">Loading…</div>
+</div>
+
+<div class="card">
+  <h2><span class="num">⌸</span> Let a colleague use this console</h2>
+  <div class="hint">
+    Separate from everything above, and much smaller: this only lets someone
+    operate the tool. It grants no ability to send under anyone's name — that
+    always comes from the person themselves.
+  </div>
   <div class="cols">
     <div>
       <label>Email</label>
@@ -52,46 +76,12 @@
       <input type="number" id="grantDays" min="1" max="365" value="7">
       <label>Note <span class="hint">why, for the record</span></label>
       <input type="text" id="grantNote" placeholder="Covering campaign launches this week">
-      <button id="btnGrantAccess">Grant access</button>
+      <button id="btnGrantAccess" class="secondary">Grant console access</button>
       <div id="grantStatus" class="msg"></div>
     </div>
-    <div class="hint" style="padding-top:26px">
-      Access is checked on every request — not just at sign-in — so an expiry
-      or a revoke takes effect on their very next click, not their next login.
-      Nothing about this affects who can <em>send mail</em> under their own
-      name: that is a separate, per-exec agent install (Operations tab),
-      unaffected by console access.
-    </div>
-  </div>
-</div>
-
-<div class="card">
-  <h2><span class="num">▤</span> Active &amp; past grants</h2>
-  <button id="btnRefreshGrants" class="secondary">Refresh</button>
-  <div id="grantsList" style="margin-top:10px"></div>
-</div>
-
-<div class="card">
-  <h2><span class="num">✉</span> Sending access — time-boxed</h2>
-  <div class="hint">
-    This is different from console access above. Sending under someone's own
-    name still needs <strong>them</strong> to authorize their own agent once —
-    a real Google OAuth consent screen, Operations tab → agent Onboard link —
-    there's no way around that step and no reason to want one; it's what
-    guarantees this tool never holds their credentials. What you control here
-    is how many days that authorization is allowed to keep sending. It stops
-    on its own after that, with no further action needed from either of you.
-  </div>
-  <div class="cols">
     <div>
-      <label>Sender email <span class="hint">must already be onboarded</span></label>
-      <input type="text" id="expirySenderEmail" placeholder="colleague@moveinsync.com">
-      <label>Days of sending access <span class="hint">blank = permanent</span></label>
-      <input type="number" id="expiryDays" min="1" max="365" placeholder="e.g. 14">
-      <button id="btnSetSenderExpiry">Set / extend</button>
-      <button id="btnClearSenderExpiry" class="secondary">Make permanent</button>
-      <div id="senderExpiryStatus" class="msg"></div>
+      <label>Current console users</label>
+      <div id="grantsList" class="hint">Loading…</div>
     </div>
-    <div id="sendingAccessList" class="hint">Loading…</div>
   </div>
 </div>

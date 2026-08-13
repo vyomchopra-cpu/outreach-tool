@@ -6,20 +6,16 @@
  *
  * ADMIN_ALLOWLIST stays as the permanent list (people who should always have
  * access, code-reviewed like everything else in shared/Config.gs).
- * AccessGrants is the temporary list: an admin — OR the specific person named
- * as approver on a request (admin/Requests.gs) — can grant someone N days of
+ * AccessGrants is the temporary list: an admin can grant someone N days of
  * the exact same access, tracked, visibly expiring, and revocable in one
  * click. isAuthorizedAdmin_ (admin/Code.gs) checks both AccessGrants and
  * ADMIN_ALLOWLIST.
  *
- * The write logic (applyAccessGrant_, applySenderExpiry_) is split from the
- * public entry points on purpose: grantAccess/setSenderExpiry are for an
- * already-authorized admin acting directly, while admin/Requests.gs's
- * decideAccessRequest needs the SAME write but authorized a different way —
- * by being the specific person a request names as approver, who may not be
- * an admin themselves (that's the whole point: a VP approving a request
- * shouldn't need to already be a console admin to do it). One write path,
- * two legitimate ways to reach it, each with its own real guard.
+ * Scope check, because these two are easy to conflate: everything in this
+ * file is about who may OPERATE the console. Who may have mail sent under
+ * their name is a completely separate question with a completely separate
+ * mechanism — admin/Delegation.gs, decided by the delegator themselves — and
+ * no function here can affect it.
  *
  * A grant is full admin access for its duration — it can build and launch
  * campaigns, not just view the dashboard. There is no read-only tier yet;
@@ -34,8 +30,17 @@ function isAccessGrantValid_(email) {
   return new Date(row.expires_at) > new Date();
 }
 
-/** The actual write. `actor` is whoever is authorized to be granting this — checked by the caller, not here. */
-function applyAccessGrant_(email, days, note, actor) {
+/**
+ * Console access only — permission to OPERATE this tool. Nothing here grants
+ * permission to send as anyone: that is never an admin's to give, and lives
+ * entirely in admin/Delegation.gs + the delegator's own approval page.
+ *
+ * An admin vouching for a colleague to use an internal tool is a normal
+ * admin action and needs no approval chain. An admin deciding whose name
+ * outgoing mail carries is not, and has none.
+ */
+function grantAccess(email, days, note) {
+  const actor = requireAdmin_();
   const clean = String(email || '').toLowerCase().trim();
   if (!isValidEmail_(clean)) throw new Error('Not a valid email: ' + email);
   if (!clean.endsWith('@' + REPLY_TO_DOMAIN)) throw new Error('This console is internal-only — ' + clean + ' is not a @' + REPLY_TO_DOMAIN + ' address');
@@ -57,12 +62,6 @@ function applyAccessGrant_(email, days, note, actor) {
   return { email: clean, expiresAt: expiresAt.toISOString() };
 }
 
-/** Direct path — an already-authorized admin granting access themselves. */
-function grantAccess(email, days, note) {
-  const admin = requireAdmin_();
-  return applyAccessGrant_(email, days, note, admin);
-}
-
 /** Immediate — the next request from that email fails auth, no waiting for expiry. */
 function revokeAccess(email) {
   const admin = requireAdmin_();
@@ -72,43 +71,18 @@ function revokeAccess(email) {
 }
 
 /**
- * Time-boxed SENDING capability — distinct from console access above. A
- * sender authorizes their own agent exactly once (a real Google OAuth
- * consent screen — no way around that, and no reason to want one, since it's
- * the whole reason this architecture never holds anyone's credentials). What
- * this controls is how many days that authorization is allowed to keep
- * actually sending; gateway/AgentApi.gs's pollDueJobs and heartbeat check it
- * on every poll, not just at registration.
+ * There is deliberately no setSenderExpiry here any more.
  *
- * days === '' clears the expiry (permanent — today's default for every
- * existing sender). A positive integer sets/extends it from NOW, not from
- * whatever the previous expiry was — calling this twice with 7 gives 7 more
- * days from the moment of the second call, not 14 from the first.
+ * It used to let an admin type in how many days someone else's name could be
+ * used, which inverted the entire premise of the tool: the person lending
+ * their identity is the only one entitled to decide for how long. That number
+ * is now set exactly once, by them, on their own approval page
+ * (agent/Approve.gs → gateway/AgentApi.gs approveDelegation), and extending it
+ * means asking them again rather than editing a field here.
+ *
+ * The operator side keeps only revokeDelegation (admin/Delegation.gs), which
+ * can shorten access but never lengthen it. That asymmetry is the guarantee.
  */
-function applySenderExpiry_(email, days, actor) {
-  const clean = String(email || '').toLowerCase().trim();
-  const sender = findRow_('Senders', clean);
-  if (!sender) throw new Error('No such sender: ' + email + ' — they need to onboard first');
-
-  if (days === '' || days === null || days === undefined) {
-    updateRow_('Senders', clean, { sends_expire_at: '', sends_granted_by: '' });
-    logEvent_(actor, 'admin_action', { senderEmail: clean, detail: { action: 'sender_expiry_cleared' } });
-    return { email: clean, expiresAt: null };
-  }
-
-  const n = Math.floor(Number(days));
-  if (!isFinite(n) || n < 1 || n > 365) throw new Error('Days must be a whole number between 1 and 365, or blank for permanent');
-  const expiresAt = new Date(Date.now() + n * 24 * 60 * 60 * 1000);
-  updateRow_('Senders', clean, { sends_expire_at: expiresAt, sends_granted_by: actor });
-  logEvent_(actor, 'admin_action', { senderEmail: clean, detail: { action: 'sender_expiry_set', days: n } });
-  return { email: clean, expiresAt: expiresAt.toISOString() };
-}
-
-/** Direct path — an already-authorized admin setting sending expiry themselves. */
-function setSenderExpiry(email, days) {
-  const admin = requireAdmin_();
-  return applySenderExpiry_(email, days, admin);
-}
 
 /** The dashboard + track view — every grant ever issued, current status, who issued it. */
 function listAccessGrants() {

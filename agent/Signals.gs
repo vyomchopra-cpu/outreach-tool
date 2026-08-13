@@ -26,7 +26,7 @@ function parseFromAddress_(fromHeader) {
 }
 
 function scanSignals_() {
-  const props = PropertiesService.getScriptProperties();
+  const props = userProps_(); // seen-message IDs are from this exec's own mailbox
   const seen = JSON.parse(props.getProperty(SEEN_IDS_PROPERTY) || '[]');
   const seenSet = {};
   seen.forEach(function (id) { seenSet[id] = true; });

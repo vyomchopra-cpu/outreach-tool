@@ -25,9 +25,24 @@ function getMyEmail_() {
   return Session.getActiveUser().getEmail();
 }
 
-/** Generated once per exec's agent install, stored only in that agent's own ScriptProperties — never the plain value, and never centrally. */
+/**
+ * Per-person state, NOT per-script.
+ *
+ * This one deployment is shared by every exec who delegates sending (the web
+ * app is executeAs USER_ACCESSING + access DOMAIN, so each visitor runs as
+ * themselves with their own OAuth grant). ScriptProperties is a single store
+ * shared across all of them — writing a sender secret there meant the second
+ * exec to onboard silently overwrote the first, and both then failed to
+ * authenticate to the gateway. Anything keyed to "this exec" must go through
+ * here. Anything genuinely global (there is currently nothing) would not.
+ */
+function userProps_() {
+  return PropertiesService.getUserProperties();
+}
+
+/** Generated once per exec, stored only in that exec's own UserProperties — never the plain value, and never centrally. */
 function getOrCreateSecret_() {
-  const props = PropertiesService.getScriptProperties();
+  const props = userProps_();
   let secret = props.getProperty('CENTRAL_SECRET');
   if (!secret) {
     secret = Utilities.getUuid() + Utilities.getUuid();

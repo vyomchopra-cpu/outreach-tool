@@ -32,12 +32,23 @@ const SCHEMA = {
   AccessGrants: ['email', 'display_name', 'granted_by', 'granted_at', 'expires_at', 'revoked', 'note'],
   // Append-only detector output — see admin/Monitor.gs.
   Incidents: ['ts', 'severity', 'detector', 'summary', 'detail', 'notified'],
-  // A request/approval flow, not a self-service grant — see admin/Requests.gs.
-  // The requester NAMES an approver; only that person, authenticated as
-  // themselves, can decide it. Nobody can grant themselves access and just
-  // write "VP approved this" in a note — the VP has to actually click Approve.
-  AccessRequests: ['id', 'requested_by', 'approver_email', 'kind', 'days_requested',
-    'reason', 'status', 'created_at', 'decided_by', 'decided_at'],
+  /**
+   * The core of the tool: an operator asks a senior exec "let me send mail
+   * from your account for N days", and the exec — signed in as themselves,
+   * on their own agent page — is the one who says yes and picks the N.
+   *
+   * This row is the audit record of that decision. The live capability it
+   * produces lives on the Senders row (sends_expire_at / sends_granted_by),
+   * written by the same authenticated action in gateway/AgentApi.gs.
+   *
+   * claim_token is what makes the exec's approval link work without the
+   * gateway (ANYONE_ANONYMOUS, no Google auth layer at all) having to trust
+   * a self-asserted email: unguessable, single-use, burned on approval, and
+   * only ever delivered to the delegator's own address.
+   */
+  Delegations: ['id', 'claim_token', 'requested_by', 'delegator_email', 'days_requested',
+    'reason', 'status', 'created_at', 'days_approved', 'approval_mode',
+    'decided_at', 'revoked_by', 'revoked_at'],
 };
 
 /** Bootstraps any missing tab with its header row. Idempotent — safe to call every deploy. */
@@ -66,7 +77,7 @@ const PRIMARY_KEY = {
   Control: 'key',
   AccessGrants: 'email',
   Incidents: null,
-  AccessRequests: 'id',
+  Delegations: 'id',
 };
 
 /** Global kill switch, checked by the agent every tick before it does anything else. */

@@ -24,8 +24,8 @@ Column order below is authoritative — `Store.gs` bootstraps headers from it an
 | `secret_hash` | string | SHA-256 of the onboarding shared secret. Never the secret itself. |
 | `consent_recorded_at` | datetime | See `docs/EXEC_CONSENT.md` |
 | `capabilities` | json | Reported by the agent every heartbeat: transport in use, whether the Gmail API (and so reply detection) is reachable, remaining provider quota. Makes a degraded agent visible instead of inferred from missing `Signals` rows. |
-| `sends_expire_at` | datetime? | Blank = permanent (default). Set/extended by an admin only (`admin/Access.gs` `setSenderExpiry`), or by a named approver deciding an `AccessRequests` row (`admin/Requests.gs` `decideAccessRequest`) — never self-declared at registration, since `gateway/` is `ANYONE_ANONYMOUS`. Checked live on every `pollDueJobs`/`heartbeat`, not cached. |
-| `sends_granted_by` | string | Whoever's authenticated action actually set `sends_expire_at` — the admin for a direct grant, or the named approver for a request/approval grant. Cleared alongside `sends_expire_at` when made permanent. |
+| `sends_expire_at` | datetime? | When the window this person granted runs out. Set **only** by `gateway/AgentApi.gs` `approveDelegation`, from the delegator's own approval. No admin-side code may write a future value here — `test/qa.mjs` fails the build if any does. Blank = permanent, which only ever comes from self-onboarding. Checked live on every `pollDueJobs`/`heartbeat`, not cached. |
+| `sends_granted_by` | string | Always the delegator themselves. It exists to make the audit trail state plainly that the person whose name is being used is the one who authorized it — never the operator who asked. |
 
 ## `Campaigns`
 
@@ -152,22 +152,25 @@ tab goes through (`Store.gs`); nothing else may call `SpreadsheetApp` directly.
 | `summary` / `detail` | string | Detail always names the specific next action, not just the symptom |
 | `notified` | string | `chat` · `no channel configured` · `suppressed (cooldown)` |
 
-## `AccessRequests`
+## `Delegations`
 
-Request → approval, not self-service self-grant — see `admin/Requests.gs`'s
-header comment for the gap this closes. The requester names an approver; only
-that approver's own authenticated sign-in can decide the row. Reachable via
-`doGet` without prior console access, in both directions — neither the
-requester nor the approver needs to already be a trusted admin.
+"Let me send mail from your account for N days." The record of the tool's
+central transaction — see `admin/Delegation.gs`. An operator raises the ask
+here; the delegator decides it on their own agent page, signed in as
+themselves (`agent/Approve.gs`). The live capability it produces lives on the
+`Senders` row; this tab is the audit trail of how it got there.
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | string | Primary key. `req_` + short UUID. |
-| `requested_by` | string | The signed-in requester — never client-supplied |
-| `approver_email` | string | Must be `@REPLY_TO_DOMAIN`, and must not equal `requested_by` |
-| `kind` | enum | `console` (→ `AccessGrants`) · `sending` (→ `Senders.sends_expire_at`) |
-| `days_requested` | int | 1–365, same bound as a direct grant |
-| `reason` | string | Free text, shown to the approver |
-| `status` | enum | `pending` · `approved` · `denied` |
+| `id` | string | Primary key. `dg_` + short UUID. |
+| `claim_token` | string | Unguessable, single-use, delivered only to the delegator. Overwritten with `used:<id>` the moment it is approved or denied — the link cannot be replayed. This is what lets the anonymous gateway trust an approval without a Google auth layer of its own. |
+| `requested_by` | string | The operator asking. Never gains any authority from this row. |
+| `delegator_email` | string | Whose name is being asked for. Must be `@REPLY_TO_DOMAIN` and must not equal `requested_by`. |
+| `days_requested` | int | What was asked for, 1–365. Advisory only. |
+| `reason` | string | Shown verbatim to the delegator when they decide. |
+| `status` | enum | `pending` · `approved` · `denied` · `revoked` · `superseded` (a newer ask replaced it) |
 | `created_at` | datetime | |
-| `decided_by` / `decided_at` | | `decided_by` is the approver's own authenticated email, not a typed-in name |
+| `days_approved` | int? | What the delegator **actually** granted. May be fewer than requested; that is the normal case, not an error. |
+| `approval_mode` | enum? | `blanket` · `per_campaign` — the delegator's own choice of how much oversight they want. |
+| `decided_at` | datetime | |
+| `revoked_by` / `revoked_at` | | Either an admin (`revokeDelegation`) or the delegator themselves (`revokeOwnDelegation`). Both only ever shorten access. |
