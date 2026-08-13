@@ -72,6 +72,35 @@ const CENTRAL_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbyLM5Wyr9S_i
  */
 const AGENT_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbxP0ae8lcMhVYJg4dp5VeSYZAr7_benBZ3zF4CTTFGTyZAA2RhkwD9u-9epCZpGmqkt/exec';
 
+/**
+ * Rewrites an Apps Script /exec URL into its Workspace-scoped form:
+ *
+ *   https://script.google.com/macros/s/<ID>/exec
+ *   https://script.google.com/a/macros/moveinsync.com/s/<ID>/exec
+ *
+ * Both point at the same deployment. The difference is which Google account
+ * the browser tries to use, and it matters far more than it looks.
+ *
+ * The plain form resolves against whatever account happens to be active in
+ * that browser. Plenty of people are signed into a personal gmail.com
+ * account as well as their work one — and because these deployments are
+ * domain-restricted, Google responds to the personal account by demanding
+ * re-verification of an account that can never be authorized anyway. On a
+ * managed device that re-auth can itself be blocked, so the person is left
+ * on a "Verify it's you / Something went wrong" screen with no way forward
+ * and no indication that the real problem is which account they're using.
+ *
+ * That is exactly what happened to the first delegator who tried an approval
+ * link, and from their side it looked like our tool was broken. The /a/
+ * form pins the account to the domain and the whole failure mode disappears,
+ * so every link we hand a human goes out in this form.
+ */
+function domainScopedUrl_(execUrl) {
+  const url = String(execUrl || '');
+  if (url.indexOf('/a/macros/') !== -1) return url; // already scoped
+  return url.replace('script.google.com/macros/', 'script.google.com/a/macros/' + REPLY_TO_DOMAIN + '/');
+}
+
 /** The admin console's own URL — used in operator-facing alerts so a notification links straight to the console. */
 const ADMIN_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbzkVMxLpWszLRqL9ec9M3LNI0wRUtTAwadZ6eEoHxoQWuia_B6XEiObHlT5Smq3bsY/exec';
 

@@ -70,9 +70,18 @@ function requestDelegation(delegatorEmail, days, reason) {
   return { id: id, approvalUrl: delegationApprovalUrl_(token), delegatorEmail: delegator, days: n };
 }
 
-/** The single link the delegator opens. Points at the agent, not this console — that is where their own Google consent and their own send authorization live. */
+/**
+ * The single link the delegator opens. Points at the agent, not this console
+ * — that is where their own Google consent and their own send authorization
+ * live.
+ *
+ * Domain-scoped deliberately: see domainScopedUrl_ in shared/Config.gs. A
+ * plain /macros/ link sent to someone who is also signed into a personal
+ * Gmail dead-ends them on a Google re-verification screen that their own IT
+ * policy may block, with nothing on it explaining why.
+ */
 function delegationApprovalUrl_(token) {
-  return AGENT_WEBAPP_URL + '?approve=' + encodeURIComponent(token);
+  return domainScopedUrl_(AGENT_WEBAPP_URL) + '?approve=' + encodeURIComponent(token);
 }
 
 /**
@@ -98,6 +107,9 @@ function delegationInviteText(delegationId) {
     + (row.reason ? 'What it\'s for: ' + row.reason + '\n\n' : '')
     + 'I\'ve asked for ' + row.days_requested + ' days — change it to whatever you\'re comfortable with:\n'
     + delegationApprovalUrl_(row.claim_token) + '\n\n'
+    + 'Open it with your @' + REPLY_TO_DOMAIN + ' account. If you\'re also signed into a personal '
+    + 'Gmail, Google may try that one instead and get stuck on a "Verify it\'s you" screen — if that '
+    + 'happens, open the link in an incognito window and sign in with work.\n\n'
     + 'You can see everything sent from your account, and cut it off instantly, from that same page.\n\n'
     + 'Thanks,\n' + who;
 }

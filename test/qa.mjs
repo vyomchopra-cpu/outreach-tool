@@ -257,6 +257,29 @@ check('every public gateway API function is actually routable from doPost', () =
     throw new Error('routed in AGENT_API_ACTIONS but not defined in AgentApi.gs, so doPost would throw: ' + dangling.join(', '));
 });
 
+check('every link handed to a human is Workspace-scoped, not account-ambiguous', () => {
+  // A plain /macros/s/<id>/exec link resolves against whatever Google account
+  // is active in that browser. The first delegator to receive one was also
+  // signed into a personal gmail.com account, so Google demanded
+  // re-verification of an account that could never be authorized, and their
+  // managed device blocked that re-auth — leaving them stuck on "Verify it's
+  // you / Something went wrong" with nothing suggesting the account was the
+  // problem. From their side the tool was simply broken.
+  const src = readFileSync('admin/Delegation.gs', 'utf8');
+  const fn = src.match(/function delegationApprovalUrl_[\s\S]*?\n\}/);
+  if (!fn) throw new Error('delegationApprovalUrl_ not found');
+  if (!/domainScopedUrl_\(/.test(fn[0]))
+    throw new Error('the approval link is not domain-scoped — a delegator signed into a personal Google account will dead-end before ever reaching the page');
+
+  const cfg = readFileSync('shared/Config.gs', 'utf8');
+  const helper = cfg.match(/function domainScopedUrl_[\s\S]*?\n\}/);
+  if (!helper) throw new Error('domainScopedUrl_ not found in shared/Config.gs');
+  if (!/\/a\/macros\/'\s*\+\s*REPLY_TO_DOMAIN/.test(helper[0]))
+    throw new Error('domainScopedUrl_ does not build the /a/macros/<domain>/ form');
+  if (!/indexOf\('\/a\/macros\/'\)/.test(helper[0]))
+    throw new Error('domainScopedUrl_ is not idempotent — double-scoping an already-scoped URL would produce a dead link');
+});
+
 check('an operator cannot name themselves as their own delegator', () => {
   const src = readFileSync('admin/Delegation.gs', 'utf8');
   if (!/delegator === requester/.test(src))
