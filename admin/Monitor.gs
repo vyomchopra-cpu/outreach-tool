@@ -244,6 +244,30 @@ function recordIncidents_(incidents) {
 /** The time-trigger entry point. Also reachable manually from the Health tab for an on-demand check. */
 function runHealthCheck_() {
   const incidents = runDetectors_();
+
+  // The detectors watch the data — backlogs, bounce rates, stale agents. The
+  // self-test watches the machinery itself: is the gateway answering, does
+  // escaping still hold, did a delegation approve without registering. Those
+  // are the failures that reached real people, and none of them would show up
+  // as an anomaly in the data, because nothing was flowing to be anomalous.
+  try {
+    const selfTest = runSelfTestProbes_();
+    selfTest.probes.filter(function (p) { return !p.ok; }).forEach(function (p) {
+      incidents.push({
+        severity: p.severity === 'warn' ? 'warn' : 'critical',
+        detector: 'selftest_' + p.name.toLowerCase().replace(/[^a-z]+/g, '_'),
+        summary: 'Self-test: ' + p.name,
+        detail: p.detail + (p.repairable ? ' — repairable from the Health tab.' : ''),
+      });
+    });
+  } catch (e) {
+    incidents.push({
+      severity: 'warn', detector: 'selftest_failed',
+      summary: 'The self-test could not run',
+      detail: String(e && e.message || e),
+    });
+  }
+
   if (incidents.length) recordIncidents_(incidents);
   return incidents;
 }

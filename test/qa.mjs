@@ -397,6 +397,51 @@ check('reply-to and unsubscribe addresses use the sender\'s own domain', () => {
   });
 });
 
+check('self-test repairs can only ever narrow what the system does', () => {
+  // runSelfTestAndRepair is wired into a 15-minute trigger, so its repairs
+  // run unattended. Anything that could GRANT — extend a window, register a
+  // sender, send a message — must never be reachable from here, no matter how
+  // convenient. Cancelling, closing and recreating a tab are the whole
+  // permitted vocabulary.
+  const src = readFileSync('admin/SelfTest.gs', 'utf8');
+  // Reads are how probes detect problems and are fine. What must never appear
+  // is a WRITE — a field appearing as an object-literal key is how every
+  // mutation in this codebase is expressed (updateRow_/upsertRow_ take a patch
+  // object), so that is what these match.
+  const forbidden = [
+    ['sends_expire_at\\s*:', 'a repair must never touch anyone\'s sending window'],
+    ['sends_granted_by\\s*:', 'a repair must never rewrite who authorized a sender'],
+    ['upsertRow_\\(\\s*\'Senders\'', 'a repair must never create or modify a sender'],
+    ['updateRow_\\(\\s*\'Senders\'', 'a repair must never modify a sender'],
+    ['\'AccessGrants\'', 'a repair must never grant console access'],
+    ['sendMessage_\\(|MailApp\\.|GmailApp\\.', 'a repair must never send mail'],
+    ['claim_token\\s*:', 'a repair must never mint or alter an approval token'],
+  ];
+  forbidden.forEach(([pattern, why]) => {
+    if (new RegExp(pattern).test(src)) throw new Error(why + ' (matched /' + pattern + '/ in admin/SelfTest.gs)');
+  });
+
+  // The read-only entry point must stay read-only, or "safe to run" is a lie.
+  const readOnly = src.match(/function runSelfTest\(\)[\s\S]*?\n\}/);
+  if (!readOnly) throw new Error('runSelfTest not found');
+  if (/updateRow_|appendRow_|ensureSchema_/.test(readOnly[0]))
+    throw new Error('runSelfTest writes — it is documented and offered in the UI as read-only');
+});
+
+check('the recurring monitor actually runs the self-test', () => {
+  // A prober nobody runs is decoration. The detectors watch data flow; the
+  // self-test watches the machinery, and the failures that reached real people
+  // were all machinery — invisible to the detectors precisely because nothing
+  // was flowing.
+  const src = readFileSync('admin/Monitor.gs', 'utf8');
+  const fn = src.match(/function runHealthCheck_[\s\S]*?\n\}/);
+  if (!fn) throw new Error('runHealthCheck_ not found');
+  if (!/runSelfTestProbes_\(/.test(fn[0]))
+    throw new Error('the 15-minute check does not run the self-test, so machinery failures stay invisible until a human clicks something');
+  if (!/try\s*\{/.test(fn[0]))
+    throw new Error('the self-test is not wrapped — a throw inside it would take out the whole health check');
+});
+
 check('the agent resolves its own identity in trigger context, not just in the web app', () => {
   // Session.getActiveUser() returns "" inside a time-driven trigger,
   // especially when the trigger's owner is not the script's owner — which is

@@ -710,6 +710,45 @@
     }).withFailureHandler(fail('monitorStatus')).sendTestAlert();
   };
 
+  // ── self-test ─────────────────────────────────────────────────
+  function renderSelfTest(r, repairs) {
+    const rows = r.probes.map(function (p) {
+      const chip = p.ok ? 'good' : (p.severity === 'warn' ? 'warn' : 'bad');
+      const label = p.ok ? 'ok' : (p.repaired ? 'repaired' : p.severity);
+      return '<div class="row"><span><strong>' + esc(p.name) + '</strong>'
+        + (p.detail ? '<div class="hint" style="white-space:normal">' + esc(p.detail) + '</div>' : '')
+        + '</span><span class="chip ' + chip + '">' + esc(label) + '</span></div>';
+    }).join('');
+    const summary = '<div class="hint" style="margin-bottom:8px">'
+      + r.passed + ' passed · ' + r.failed + ' failed'
+      + (r.critical ? ' · <span style="color:var(--bad)">' + r.critical + ' critical</span>' : '')
+      + '</div>';
+    const fixed = (repairs && repairs.length)
+      ? '<div class="msg good" style="margin-top:10px">' + repairs.map(esc).join('<br>') + '</div>' : '';
+    $('selfTestResults').innerHTML = summary + rows + fixed;
+  }
+
+  $('btnSelfTest').onclick = function () {
+    setMsg('selfTestStatus', 'Probing the live system…');
+    google.script.run.withSuccessHandler(function (r) {
+      setMsg('selfTestStatus', r.failed
+        ? r.failed + ' problem(s) found' + (r.repairable ? ' — ' + r.repairable + ' can be repaired automatically.' : '.')
+        : 'Everything checks out.', r.failed ? (r.critical ? 'bad' : 'warn') : 'good');
+      renderSelfTest(r);
+    }).withFailureHandler(fail('selfTestStatus')).runSelfTest();
+  };
+
+  $('btnSelfTestRepair').onclick = function () {
+    setMsg('selfTestStatus', 'Probing and repairing…');
+    google.script.run.withSuccessHandler(function (out) {
+      setMsg('selfTestStatus', out.repairs.length
+        ? out.repairs.length + ' repair(s) applied. ' + out.after.failed + ' problem(s) remain.'
+        : 'Nothing was repairable. ' + out.after.failed + ' problem(s) remain.',
+        out.after.failed ? 'warn' : 'good');
+      renderSelfTest(out.after, out.repairs);
+    }).withFailureHandler(fail('selfTestStatus')).runSelfTestAndRepair();
+  };
+
   window.copyRepairLink = function (url, who) {
     copyText(url, 'Restart link for ' + who);
     setMsg('monitorStatus', 'Restart link for ' + who + ' copied. They must open it themselves, '

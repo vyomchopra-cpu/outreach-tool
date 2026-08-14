@@ -43,6 +43,25 @@
 </div>
 
 <div class="card">
+  <h2><span class="num">🧪</span> Self-test</h2>
+  <div class="hint">
+    Probes the running system rather than the code — the Sheet, the gateway,
+    every sender, real rendering. This is where the failures that reach people
+    actually live: every one so far shipped with a fully green code test suite,
+    because none of them were visible in the source.
+    <strong>Run it</strong> is read-only and always safe. <strong>Run and
+    repair</strong> additionally applies fixes that can only ever narrow what
+    the system does — cancelling a send that must not go, closing a dead
+    request, recreating a missing tab. Nothing it does can grant access,
+    extend anyone's window, or send anything.
+  </div>
+  <button id="btnSelfTest">Run it</button>
+  <button id="btnSelfTestRepair" class="secondary">Run and repair</button>
+  <div id="selfTestStatus" class="msg"></div>
+  <div id="selfTestResults" style="margin-top:10px"></div>
+</div>
+
+<div class="card">
   <h2><span class="num">⚙</span> Alerts &amp; keys</h2>
   <div class="hint">
     Both of these are stored privately in this project and are never shown
