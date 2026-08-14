@@ -68,7 +68,7 @@ function requestDelegation(delegatorEmail, days, reason) {
     detail: { action: 'request_delegation', days: n, superseded: existing.length },
   });
 
-  return { id: id, approvalUrl: delegationApprovalUrl_(token), delegatorEmail: delegator, days: n };
+  return { id: id, approvalUrl: delegationApprovalUrl_(token, delegator), delegatorEmail: delegator, days: n };
 }
 
 /**
@@ -76,13 +76,26 @@ function requestDelegation(delegatorEmail, days, reason) {
  * — that is where their own Google consent and their own send authorization
  * live.
  *
- * Domain-scoped deliberately: see domainScopedUrl_ in shared/Config.gs. A
- * plain /macros/ link sent to someone who is also signed into a personal
- * Gmail dead-ends them on a Google re-verification screen that their own IT
- * policy may block, with nothing on it explaining why.
+ * Which URL form depends on who is being asked, and getting it wrong breaks
+ * the link in one direction or the other:
+ *
+ *   inside the domain  -> /a/macros/<domain>/s/... , so a delegator who is
+ *      also signed into a personal Gmail doesn't get silently resolved
+ *      against that account and dead-ended on a Google re-verification
+ *      screen their IT policy may block.
+ *   outside the domain -> plain /macros/s/... , because the /a/ form REQUIRES
+ *      an account in that Workspace and rejects a personal account outright.
+ *
+ * This used to always domain-scope, leaving the operator to hand-edit the URL
+ * for an external test delegator — which promptly produced a broken link,
+ * because deleting the /a/macros/<domain>/ segment also deletes the /macros/
+ * the generic form still needs. Not something a human should be doing by
+ * hand at all.
  */
-function delegationApprovalUrl_(token) {
-  return domainScopedUrl_(AGENT_WEBAPP_URL) + '?approve=' + encodeURIComponent(token);
+function delegationApprovalUrl_(token, delegatorEmail) {
+  const internal = String(delegatorEmail || '').toLowerCase().endsWith('@' + REPLY_TO_DOMAIN);
+  const base = internal ? domainScopedUrl_(AGENT_WEBAPP_URL) : AGENT_WEBAPP_URL;
+  return base + '?approve=' + encodeURIComponent(token);
 }
 
 /**
@@ -107,7 +120,7 @@ function delegationInviteText(delegationId) {
     + 'ever having your password or seeing your inbox.\n\n'
     + (row.reason ? 'What it\'s for: ' + row.reason + '\n\n' : '')
     + 'I\'ve asked for ' + row.days_requested + ' days — change it to whatever you\'re comfortable with:\n'
-    + delegationApprovalUrl_(row.claim_token) + '\n\n'
+    + delegationApprovalUrl_(row.claim_token, row.delegator_email) + '\n\n'
     + 'Open it with your @' + REPLY_TO_DOMAIN + ' account. If you\'re also signed into a personal '
     + 'Gmail, Google may try that one instead and get stuck on a "Verify it\'s you" screen — if that '
     + 'happens, open the link in an incognito window and sign in with work.\n\n'

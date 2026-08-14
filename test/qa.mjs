@@ -270,6 +270,13 @@ check('every link handed to a human is Workspace-scoped, not account-ambiguous',
   if (!fn) throw new Error('delegationApprovalUrl_ not found');
   if (!/domainScopedUrl_\(/.test(fn[0]))
     throw new Error('the approval link is not domain-scoped — a delegator signed into a personal Google account will dead-end before ever reaching the page');
+  // ...but only for delegators the /a/ form can actually serve. It requires
+  // an account in that Workspace, so scoping an external test delegator's
+  // link makes it reject the only account that could use it.
+  if (!/endsWith\('@' \+ REPLY_TO_DOMAIN\)/.test(fn[0]))
+    throw new Error('delegationApprovalUrl_ scopes unconditionally — an external delegator would get a /a/macros/ link their account cannot open');
+  if (!/delegationApprovalUrl_\(\s*\w+\s*,\s*\w+/.test(src.replace(/function delegationApprovalUrl_[\s\S]*?\n\}/, '')))
+    throw new Error('a caller of delegationApprovalUrl_ omits the delegator email, so it cannot pick the right URL form');
 
   const cfg = readFileSync('shared/Config.gs', 'utf8');
   const helper = cfg.match(/function domainScopedUrl_[\s\S]*?\n\}/);
