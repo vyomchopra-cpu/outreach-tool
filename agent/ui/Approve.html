@@ -169,13 +169,50 @@
     </div>
   </div>
 
+  <!-- ── Needs re-authorization ──────────────────────── -->
+  <!--
+    Distinct from the generic error on purpose. This one is NOT a bad link,
+    and telling someone to go get a fresh link when their grant is the
+    problem sends them round a loop that can never resolve — the new link
+    fails identically. Apps Script does not re-prompt for scopes once a
+    partial grant exists for a script, so the only way out is to drop the
+    grant and let the consent screen run again from scratch.
+  -->
+  <div id="authView" hidden>
+    <div class="card">
+      <h1>One permission is missing</h1>
+      <p>Your Google account authorized this tool, but without one of the
+      permissions it needs. That usually happens when a sign-in gets
+      interrupted partway through.</p>
+      <p class="muted"><b>The link you were sent is still fine</b> — nothing
+      has been used up, and you don't need a new one.</p>
+
+      <h2 style="margin-top:22px">To fix it, about 30 seconds</h2>
+      <ol style="padding-left:20px">
+        <li>Open <b>myaccount.google.com/permissions</b> (signed in with your
+        work account).</li>
+        <li>Find <b>MIS Outreach</b> in the list and remove its access.</li>
+        <li>Come back to this page and reload it.</li>
+        <li>Approve the permissions when Google asks — this time it will ask
+        for the full set.</li>
+      </ol>
+      <p class="muted" style="margin-top:18px">If you're signed into more than
+      one Google account, open the link in an incognito window and sign in
+      with your work account only.</p>
+      <details style="margin-top:14px">
+        <summary class="muted" style="cursor:pointer">Technical detail</summary>
+        <p id="authRaw" class="err" style="font-size:12.5px"></p>
+      </details>
+    </div>
+  </div>
+
   <!-- ── Error ───────────────────────────────────────── -->
   <div id="errView" hidden>
     <div class="card">
       <h1>This link didn't work</h1>
       <p id="errMsg" class="err"></p>
-      <p class="muted">Approval links are single-use and are tied to one
-      person. Ask whoever sent it to generate a fresh one.</p>
+      <p class="muted">Approval links are tied to one person and are used up
+      once a decision is made. Ask whoever sent it to generate a fresh one.</p>
     </div>
   </div>
 </div>
@@ -185,9 +222,25 @@
 
   function $(id) { return document.getElementById(id); }
   function show(id) {
-    ['loading', 'askView', 'doneView', 'deniedView', 'errView'].forEach(function (v) {
+    ['loading', 'askView', 'doneView', 'deniedView', 'authView', 'errView'].forEach(function (v) {
       $(v).hidden = (v !== id);
     });
+  }
+
+  /**
+   * A missing OAuth scope surfaces as an ordinary thrown error, identical in
+   * shape to "bad token" — but the two need opposite advice, and getting it
+   * wrong strands the person. Anything mentioning permission/authorization
+   * routes to the recovery steps rather than "ask for a new link."
+   */
+  function isAuthError(e) {
+    return /permission|authoriz|auth\.?scope|script\.external_request/i.test(e && (e.message || e) || '');
+  }
+  function routeError(e) {
+    var msg = (e && e.message) || String(e);
+    if (isAuthError(e)) { $('authRaw').textContent = msg; show('authView'); return; }
+    $('errMsg').textContent = msg;
+    show('errView');
   }
   function esc(s) {
     return String(s == null ? '' : s)
@@ -217,10 +270,7 @@
       }
       show('askView');
     })
-    .withFailureHandler(function (e) {
-      $('errMsg').textContent = e.message || String(e);
-      show('errView');
-    })
+    .withFailureHandler(routeError)
     .getDelegationForApproval(TOKEN);
 
   document.querySelectorAll('.mode input').forEach(function (r) {
@@ -264,6 +314,9 @@
       })
       .withFailureHandler(function (e) {
         $('btnApprove').textContent = 'Approve';
+        // Approving also reaches the network, so the same missing-scope
+        // failure can land here rather than on first paint.
+        if (isAuthError(e)) { routeError(e); return; }
         fail('askErr')(e);
       })
       .approveDelegationFromPage(TOKEN, days, mode, $('dispName').value, null);
