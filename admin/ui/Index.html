@@ -799,7 +799,9 @@
   window.copyDelegationLink = function (id) {
     google.script.run.withSuccessHandler(function (r) {
       copyText(r.url, 'Link for ' + r.delegatorEmail);
-      setMsg('dgStatus', 'Link for ' + r.delegatorEmail + ' copied. Send it as-is — don\'t edit it.', 'good');
+      setMsg('dgStatus', 'Link for ' + r.delegatorEmail + ' copied — send it as-is. '
+        + 'Stored token: ' + r.fingerprint + '. If the approval page reports a different one, '
+        + 'the link is being altered in transit.', 'good');
     }).withFailureHandler(fail('dgStatus')).getDelegationLink(id);
   };
 

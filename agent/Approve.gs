@@ -48,10 +48,29 @@ function getAuthStatus() {
   }
 }
 
+/** Length plus both ends — enough to compare two tokens across a phone screen and a console, without printing a live credential in full. */
+function tokenFingerprint_(token) {
+  const t = String(token || '');
+  if (!t) return '(empty)';
+  return t.length + ' chars, ' + t.slice(0, 6) + '…' + t.slice(-6);
+}
+
 /** What the page needs on first paint. Read-only — opening the link decides nothing. */
 function getDelegationForApproval(token) {
   const email = getMyEmail_();
-  const info = callCentral_('lookupDelegation', [token, email]);
+  let info;
+  try {
+    info = callCentral_('lookupDelegation', [token, email]);
+  } catch (e) {
+    // "Not recognised" is unactionable without knowing what actually
+    // arrived — the token can be corrupted anywhere between the console,
+    // a messaging app, the address bar, and this page's own templating.
+    // The fingerprint makes that comparison possible in one glance.
+    if (/not recognised/i.test(String(e.message))) {
+      throw new Error(e.message + ' [received: ' + tokenFingerprint_(token) + ']');
+    }
+    throw e;
+  }
   return {
     myEmail: email,
     suggestedName: prettyNameFromEmail_(email),

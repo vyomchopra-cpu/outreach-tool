@@ -142,9 +142,13 @@ function getDelegationLink(delegationId) {
   if (row.status !== 'pending') {
     throw new Error('That request is ' + row.status + ' — its link no longer does anything. Create a new one.');
   }
+  const token = String(row.claim_token || '');
   return {
-    url: delegationApprovalUrl_(row.claim_token, row.delegator_email),
+    url: delegationApprovalUrl_(token, row.delegator_email),
     delegatorEmail: row.delegator_email,
+    // Same shape the approval page reports back on a failed lookup, so the
+    // two can be compared directly rather than inferred from symptoms.
+    fingerprint: token.length + ' chars, ' + token.slice(0, 6) + '…' + token.slice(-6),
   };
 }
 

@@ -290,6 +290,23 @@ check('every link handed to a human is Workspace-scoped, not account-ambiguous',
     throw new Error('domainScopedUrl_ is not idempotent — double-scoping an already-scoped URL would produce a dead link');
 });
 
+check('the approval token reaches the page uncorrupted by template escaping', () => {
+  // <?= ?> HTML-escapes its output. Applied to JSON.stringify's quotes it
+  // emits &quot;, and a <script> block does not decode entities — so the
+  // token either arrives mangled or the block fails to parse. The unescaped
+  // form is correct here precisely because the server restricts the value to
+  // hex first, so both halves of that bargain are checked together.
+  const html = readFileSync('agent/ui/Approve.html', 'utf8');
+  if (/<\?=\s*JSON\.stringify\(token\)/.test(html))
+    throw new Error('token is printed with <?= ?>, which HTML-escapes it inside a <script> block');
+  if (!/<\?!=\s*JSON\.stringify\(token\)/.test(html))
+    throw new Error('token is not printed as a JSON literal — an unquoted value would be a syntax error');
+
+  const web = readFileSync('agent/Web.gs', 'utf8');
+  if (!/replace\(\/\[\^0-9a-fA-F\]\/g, ''\)/.test(web))
+    throw new Error('the token is printed unescaped but not restricted to hex first — that combination is an injection into the page script');
+});
+
 check('an operator cannot name themselves as their own delegator', () => {
   const src = readFileSync('admin/Delegation.gs', 'utf8');
   if (!/delegator === requester/.test(src))

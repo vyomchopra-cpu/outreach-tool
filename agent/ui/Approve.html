@@ -219,7 +219,16 @@
 </div>
 
 <script>
-  var TOKEN = <?= JSON.stringify(token) ?>;
+  /*
+    <?!= ?> not <?= ?>. The escaping form HTML-escapes its output, which
+    turns JSON.stringify's quotes into &quot; — and inside a <script> block
+    the browser does not decode entities, so the token arrives corrupted (or
+    the block fails to parse outright). JSON.stringify already produces a
+    valid, safely-quoted JS literal, and the server sanitises the token to
+    hex before it reaches here, so there is nothing left for HTML escaping
+    to protect against.
+  */
+  var TOKEN = <?!= JSON.stringify(token) ?>;
 
   function $(id) { return document.getElementById(id); }
   function show(id) {

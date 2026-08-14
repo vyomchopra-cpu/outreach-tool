@@ -36,7 +36,10 @@ function doGet(e) {
 
   if (p.approve) {
     const t = HtmlService.createTemplateFromFile('ui/Approve');
-    t.token = p.approve;
+    // Tokens are hex by construction (admin/Delegation.gs newClaimToken_).
+    // Stripping anything else guarantees the value is inert in a JS string
+    // literal, which is what lets the template print it unescaped.
+    t.token = String(p.approve).replace(/[^0-9a-fA-F]/g, '');
     return t.evaluate()
       .setTitle('Approve sending — MIS Outreach')
       .addMetaTag('viewport', 'width=device-width, initial-scale=1');
