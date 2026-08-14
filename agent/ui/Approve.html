@@ -180,26 +180,27 @@
   -->
   <div id="authView" hidden>
     <div class="card">
-      <h1>One permission is missing</h1>
-      <p>Your Google account authorized this tool, but without one of the
-      permissions it needs. That usually happens when a sign-in gets
-      interrupted partway through.</p>
-      <p class="muted"><b>The link you were sent is still fine</b> — nothing
-      has been used up, and you don't need a new one.</p>
+      <h1>One more permission needed</h1>
+      <p>Google granted this tool some of what it needs, but not all of it.
+      One click fixes that — there's nothing to switch off or uninstall.</p>
+      <p class="muted"><b>The link you were sent is still fine.</b> Nothing has
+      been used up and you don't need a new one.</p>
 
-      <h2 style="margin-top:22px">To fix it, about 30 seconds</h2>
-      <ol style="padding-left:20px">
-        <li>Open <b>myaccount.google.com/permissions</b> (signed in with your
-        work account).</li>
-        <li>Find <b>MIS Outreach</b> in the list and remove its access.</li>
-        <li>Come back to this page and reload it.</li>
-        <li>Approve the permissions when Google asks — this time it will ask
-        for the full set.</li>
-      </ol>
-      <p class="muted" style="margin-top:18px">If you're signed into more than
-      one Google account, open the link in an incognito window and sign in
-      with your work account only.</p>
-      <details style="margin-top:14px">
+      <div class="row">
+        <button id="btnAuthorize">Grant the missing permission</button>
+      </div>
+      <p class="muted" id="authReturnHint" style="margin-top:14px" hidden>
+        Approve it on Google's screen, then come back here and reload this page.
+      </p>
+
+      <div id="authFallback" hidden>
+        <p class="muted" style="margin-top:18px">If that button doesn't get you
+        there, open this link in an <b>incognito window</b> and sign in with
+        your work account only — a second Google account signed in elsewhere
+        is the usual cause.</p>
+      </div>
+
+      <details style="margin-top:18px">
         <summary class="muted" style="cursor:pointer">Technical detail</summary>
         <p id="authRaw" class="err" style="font-size:12.5px"></p>
       </details>
@@ -238,9 +239,36 @@
   }
   function routeError(e) {
     var msg = (e && e.message) || String(e);
-    if (isAuthError(e)) { $('authRaw').textContent = msg; show('authView'); return; }
-    $('errMsg').textContent = msg;
-    show('errView');
+    if (!isAuthError(e)) {
+      $('errMsg').textContent = msg;
+      show('errView');
+      return;
+    }
+    $('authRaw').textContent = msg;
+    show('authView');
+
+    // Ask Google for the URL that grants exactly what's missing, rather than
+    // sending someone to revoke the app by hand — that route was tried on a
+    // real managed device and left the person going in circles.
+    google.script.run
+      .withSuccessHandler(function (s) {
+        if (s && s.authUrl) {
+          $('btnAuthorize').onclick = function () {
+            window.open(s.authUrl, '_blank', 'noopener');
+            $('authReturnHint').hidden = false;
+          };
+        } else {
+          // Couldn't determine a URL — don't leave a button that does nothing.
+          $('btnAuthorize').hidden = true;
+          $('authFallback').hidden = false;
+          if (s && s.checkFailed) $('authRaw').textContent = msg + '\n\n' + s.checkFailed;
+        }
+      })
+      .withFailureHandler(function () {
+        $('btnAuthorize').hidden = true;
+        $('authFallback').hidden = false;
+      })
+      .getAuthStatus();
   }
   function esc(s) {
     return String(s == null ? '' : s)

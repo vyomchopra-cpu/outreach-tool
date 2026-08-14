@@ -31,6 +31,31 @@ function doGet(e) {
       .addMetaTag('viewport', 'width=device-width, initial-scale=1');
   }
 
+  /**
+   * Deliberately touches nothing but Session and ScriptApp — no network, no
+   * Gmail, no gateway. ?diagnose=1 cannot answer "why did this fail" when
+   * the failure IS the network call, because it needs the same permission
+   * that is missing. This route still renders when everything else is
+   * broken, which is the only time anyone needs it.
+   */
+  if (p.whoami === '1') {
+    const auth = getAuthStatus();
+    return html_(''
+      + '<h3>Account check</h3>'
+      + '<ul>'
+      + '<li>Signed in as: <strong>' + email + '</strong></li>'
+      + '<li>Domain matches: <strong>' + (email.toLowerCase().endsWith('@' + REPLY_TO_DOMAIN) ? 'yes' : 'NO') + '</strong></li>'
+      + '<li>Extra authorization needed: <strong>' + (auth.required ? 'YES' : 'no') + '</strong></li>'
+      + (auth.checkFailed ? '<li>Check failed: <code>' + auth.checkFailed + '</code></li>' : '')
+      + '</ul>'
+      + (auth.authUrl
+        ? '<p><a href="' + auth.authUrl + '" target="_blank" rel="noopener">Grant the missing permission</a>'
+          + ' — then reload this page; it should say "no".</p>'
+        : '<p>Nothing further to grant from here.</p>')
+      + '<p style="color:#666;font-size:13px">Send a screenshot of this page to whoever asked you '
+      + 'to approve — it says exactly which account you are on and whether the permission is the problem.</p>');
+  }
+
   if (p.diagnose === '1') {
     return html_(renderDiagnosticsHtml_(runDiagnostics_()));
   }

@@ -16,6 +16,38 @@
  * yet authorized anything to send.
  */
 
+/**
+ * Whether this visitor's Google account has actually granted everything the
+ * page will need, and if not, the URL that fixes it.
+ *
+ * Needed because of an Apps Script behaviour that produces a genuinely
+ * stuck user: once an account holds ANY grant for a script, opening the web
+ * app does not re-prompt for scopes it is missing. doGet runs, the page
+ * renders, and the first call needing the absent scope throws
+ * "You do not have permission to call UrlFetchApp.fetch" at runtime.
+ *
+ * The instinct is to tell the person to remove the app at
+ * myaccount.google.com/permissions and start over. That was tried and does
+ * not reliably work — the entry is not always there to remove, and on a
+ * managed device the account screens themselves can be restricted. Google's
+ * own answer is getAuthorizationUrl(): a link that requests exactly the
+ * missing scopes, with no revoking and no settings to change. Send them
+ * there instead of asking them to dismantle anything.
+ *
+ * Deliberately defensive: if this check cannot run, it reports "not
+ * required" rather than throwing, so a diagnostic never becomes the thing
+ * that blocks an approval.
+ */
+function getAuthStatus() {
+  try {
+    const info = ScriptApp.getAuthorizationInfo(ScriptApp.AuthMode.FULL);
+    const required = info.getAuthorizationStatus() === ScriptApp.AuthorizationStatus.REQUIRED;
+    return { required: required, authUrl: required ? info.getAuthorizationUrl() : null };
+  } catch (e) {
+    return { required: false, authUrl: null, checkFailed: String(e && e.message || e) };
+  }
+}
+
 /** What the page needs on first paint. Read-only — opening the link decides nothing. */
 function getDelegationForApproval(token) {
   const email = getMyEmail_();
