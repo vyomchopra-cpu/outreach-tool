@@ -54,15 +54,29 @@ function onboardSender(displayName, timezone) {
   return result;
 }
 
-/** Single fixed Reply-To tag, not per-campaign — see docs/ARCHITECTURE.md §4 for why. */
+/**
+ * Single fixed Reply-To tag, not per-campaign — see docs/ARCHITECTURE.md §4.
+ *
+ * Built from the sender's OWN domain, not REPLY_TO_DOMAIN. These used to
+ * splice the local part onto REPLY_TO_DOMAIN unconditionally, which is
+ * correct only while every sender is inside the domain: a sender at
+ * example@gmail.com got a Reply-To of example+o@moveinsync.com — an address
+ * that does not exist, so every reply to their campaigns would have bounced.
+ * Latent for as long as senders and the domain were the same thing, and
+ * live the moment they were not.
+ */
+function taggedOwnAddress_(tag) {
+  const email = getMyEmail_();
+  const at = email.lastIndexOf('@');
+  return email.slice(0, at) + '+' + tag + email.slice(at);
+}
+
 function replyToAddress_() {
-  const localPart = getMyEmail_().split('@')[0];
-  return localPart + '+o@' + REPLY_TO_DOMAIN;
+  return taggedOwnAddress_('o');
 }
 
 function unsubscribeAddress_() {
-  const localPart = getMyEmail_().split('@')[0];
-  return localPart + '+unsub@' + REPLY_TO_DOMAIN;
+  return taggedOwnAddress_('unsub');
 }
 
 function ensureLabelsAndFilters_() {

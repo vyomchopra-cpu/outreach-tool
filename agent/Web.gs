@@ -17,8 +17,19 @@
  */
 function doGet(e) {
   const email = getMyEmail_();
-  if (!email.toLowerCase().endsWith('@' + REPLY_TO_DOMAIN)) {
-    return html_('<p>This agent is only for ' + REPLY_TO_DOMAIN + ' accounts.</p>');
+
+  // With access:ANYONE (see EXTERNAL_TEST_DELEGATORS in shared/Config.gs),
+  // Google's own deployment setting no longer keeps strangers out — this
+  // check is what does. Every route below is behind it.
+  if (!isAllowedAgentUser_(email)) {
+    return html_(''
+      + '<h3>Not authorized</h3>'
+      + (email
+        ? '<p>You are signed in as <strong>' + email + '</strong>, which is not set up to use this tool.</p>'
+        : '<p>Google did not report an email address for your session. Try opening this link in an '
+          + 'incognito window and signing in again.</p>')
+      + '<p style="color:#666;font-size:13px">If you were asked to approve sending from your account, '
+      + 'check you are signed in with the address the request was sent to.</p>');
   }
 
   const p = e.parameter || {};

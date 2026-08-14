@@ -294,12 +294,43 @@ check('an operator cannot name themselves as their own delegator', () => {
 // putting a sender secret there made each new delegator silently clobber the
 // last one, and both then failed to authenticate.
 
-check('the agent web app is reachable by the whole domain, not just its owner', () => {
+check('the agent web app is reachable by delegators, and never anonymously', () => {
   const manifest = JSON.parse(readFileSync('agent/appsscript.json', 'utf8'));
-  if (manifest.webapp.access !== 'DOMAIN')
-    throw new Error('agent webapp access is "' + manifest.webapp.access + '" — a delegator could not open their own approval link');
+  const access = manifest.webapp.access;
+  if (access !== 'DOMAIN' && access !== 'ANYONE')
+    throw new Error('agent webapp access is "' + access + '" — a delegator could not open their own approval link');
+  if (access === 'ANYONE_ANONYMOUS')
+    throw new Error('the agent must never be anonymous: it runs as the visitor and sends mail as them');
   if (manifest.webapp.executeAs !== 'USER_ACCESSING')
     throw new Error('agent webapp executeAs is "' + manifest.webapp.executeAs + '" — it must run as the visitor for their approval to be their own act');
+
+  // ANYONE removes the domain restriction as a barrier, so the in-code guard
+  // becomes the only thing keeping strangers out. Refuse the combination
+  // unless that guard is actually applied on entry.
+  if (access === 'ANYONE') {
+    const web = readFileSync('agent/Web.gs', 'utf8');
+    const doGet = web.match(/function doGet[\s\S]*?\n\}/);
+    if (!doGet || !/isAllowedAgentUser_\(/.test(doGet[0]))
+      throw new Error('access:ANYONE without isAllowedAgentUser_ in doGet — every signed-in Google account on earth could reach the agent');
+    const approve = readFileSync('agent/Approve.gs', 'utf8');
+    if (!/isAllowedAgentUser_\(/.test(approve.match(/function approveDelegationFromPage[\s\S]*?\n\}/)[0]))
+      throw new Error('access:ANYONE without isAllowedAgentUser_ in approveDelegationFromPage');
+  }
+});
+
+check('reply-to and unsubscribe addresses use the sender\'s own domain', () => {
+  // Splicing the local part onto REPLY_TO_DOMAIN is right only while every
+  // sender is inside the domain. A sender at gmail.com would have advertised
+  // a Reply-To at moveinsync.com that does not exist, bouncing every reply.
+  const src = readFileSync('agent/Onboard.gs', 'utf8');
+  const fn = src.match(/function taggedOwnAddress_[\s\S]*?\n\}/);
+  if (!fn) throw new Error('taggedOwnAddress_ not found');
+  if (/REPLY_TO_DOMAIN/.test(fn[0]))
+    throw new Error('the address is built from REPLY_TO_DOMAIN rather than the sender\'s own address');
+  ['replyToAddress_', 'unsubscribeAddress_'].forEach(name => {
+    const f = src.match(new RegExp('function ' + name + '[\\s\\S]*?\\n\\}'));
+    if (!f || !/taggedOwnAddress_\(/.test(f[0])) throw new Error(name + ' does not go through taggedOwnAddress_');
+  });
 });
 
 check('no per-person agent state is kept in the shared ScriptProperties store', () => {

@@ -44,6 +44,43 @@ const SEED_MAILBOXES = [
 
 const REPLY_TO_DOMAIN = 'moveinsync.com';
 
+/**
+ * Addresses OUTSIDE REPLY_TO_DOMAIN that may act as a delegator. Empty means
+ * the feature is off and only @REPLY_TO_DOMAIN accounts can do anything.
+ *
+ * This exists for one specific, temporary job: proving the approval flow
+ * works at all. When a delegator inside the domain fails, there is no way to
+ * tell a bug in our code apart from a Workspace policy blocking the app —
+ * both look identical from the outside. Running the identical flow on a
+ * personal Google account, which no corporate policy touches, separates the
+ * two in about a minute.
+ *
+ * The cost is real and should be understood rather than waved through: the
+ * agent web app has to be deployed access:ANYONE for a non-domain account to
+ * reach it at all (agent/appsscript.json). ANYONE means "any signed-in
+ * Google account", not anonymous — but it does mean the domain restriction
+ * is no longer what keeps strangers out. This list is. Every entry is one
+ * account that can be asked to lend its name, so keep it to accounts you
+ * personally control, and empty it when the test is done:
+ *
+ *   1. clear this array
+ *   2. set agent/appsscript.json webapp.access back to "DOMAIN"
+ *   3. push + redeploy the agent
+ *
+ * Nothing else in the tool depends on it being populated.
+ */
+const EXTERNAL_TEST_DELEGATORS = [
+  'vyom2724@gmail.com',
+];
+
+/** The one place "may this account take part at all" is decided. */
+function isAllowedAgentUser_(email) {
+  const clean = String(email || '').toLowerCase().trim();
+  if (!clean) return false;
+  if (clean.endsWith('@' + REPLY_TO_DOMAIN)) return true;
+  return EXTERNAL_TEST_DELEGATORS.indexOf(clean) !== -1;
+}
+
 // Defence in depth alongside the appsscript.json domain restriction (see
 // docs/ARCHITECTURE.md §2) — the 2-3 admins who may build/launch campaigns.
 const ADMIN_ALLOWLIST = [

@@ -36,8 +36,9 @@ function requestDelegation(delegatorEmail, days, reason) {
 
   const delegator = String(delegatorEmail || '').toLowerCase().trim();
   if (!isValidEmail_(delegator)) throw new Error('Not a valid email: ' + delegatorEmail);
-  if (!delegator.endsWith('@' + REPLY_TO_DOMAIN)) {
-    throw new Error('You can only ask a @' + REPLY_TO_DOMAIN + ' colleague');
+  if (!isAllowedAgentUser_(delegator)) {
+    throw new Error('You can only ask a @' + REPLY_TO_DOMAIN + ' colleague'
+      + ' (or an address listed in EXTERNAL_TEST_DELEGATORS, for testing the flow)');
   }
   if (delegator === requester) {
     throw new Error('You cannot ask yourself — to send under your own name, onboard yourself as a sender instead');

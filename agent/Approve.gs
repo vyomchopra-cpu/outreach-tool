@@ -81,6 +81,7 @@ function prettyNameFromEmail_(email) {
  */
 function approveDelegationFromPage(token, days, mode, displayName, timezone) {
   const email = getMyEmail_();
+  if (!isAllowedAgentUser_(email)) throw new Error('This account is not set up to use this tool: ' + (email || 'unknown'));
   const secret = getOrCreateSecret_();
 
   const result = callCentral_('approveDelegation', [
