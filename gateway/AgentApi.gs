@@ -310,8 +310,31 @@ function heartbeat(email, secret, agentVersion, capabilities) {
  */
 const SEED_PREFIX = 'seed:';
 
+/**
+ * A one-off test send: arbitrary address, arbitrary content, sent through the
+ * real render/merge/MIME/transport path so that "it worked" means something.
+ *
+ * Kept distinct from seed: on purpose, because the two need DIFFERENT rules
+ * and collapsing them would be a real bug. Both skip the daily cap and the
+ * send window — neither is a prospect touch. But a seed goes to SEED_MAILBOXES,
+ * a fixed list of our own inboxes, so skipping the suppression check is
+ * harmless; a test send goes wherever the operator types, which could be
+ * someone who has unsubscribed. Test sends are suppression-checked like any
+ * real send.
+ */
+const TEST_PREFIX = 'test:';
+
 function isSeedRecipientId_(recipientId) {
   return String(recipientId || '').indexOf(SEED_PREFIX) === 0;
+}
+
+function isTestRecipientId_(recipientId) {
+  return String(recipientId || '').indexOf(TEST_PREFIX) === 0;
+}
+
+/** Neither seed nor test is a prospect touch, so neither consumes the cap or waits for the window. */
+function isSyntheticRecipientId_(recipientId) {
+  return isSeedRecipientId_(recipientId) || isTestRecipientId_(recipientId);
 }
 
 /**
@@ -323,7 +346,10 @@ function syntheticSeedRecipient_(recipientId) {
   return {
     id: recipientId,
     campaign_id: '',
-    email: recipientId.slice(SEED_PREFIX.length),
+    // Strip whichever prefix this is — 'seed:' and 'test:' are the same
+    // length, but slicing a hard-coded one would silently mangle the address
+    // if that ever stops being true.
+    email: recipientId.slice(recipientId.indexOf(':') + 1),
     first_name: 'Sam',
     last_name: 'Prospect',
     company: 'Example Corp',
@@ -341,7 +367,7 @@ function sentTodayCountFor_(senderRow) {
   const todayLocal = formatInZoneViaUtilities_(new Date(), senderRow.timezone).slice(0, 10);
   return readRows_('Queue', function (q) {
     if (q.sender_email !== senderRow.email || q.status !== 'sent' || !q.sent_at) return false;
-    if (isSeedRecipientId_(q.recipient_id)) return false;
+    if (isSyntheticRecipientId_(q.recipient_id)) return false;
     return formatInZoneViaUtilities_(new Date(q.sent_at), senderRow.timezone).slice(0, 10) === todayLocal;
   }).length;
 }
@@ -367,27 +393,33 @@ function pollDueJobs(email, secret) {
     return q.sender_email === email && q.status === 'pending' && new Date(q.due_at_utc) <= now;
   }).sort(function (a, b) { return new Date(a.due_at_utc) - new Date(b.due_at_utc); });
 
-  // Seed sends are not prospect touches: they bypass the daily allowance
-  // (their volume is bounded by SEED_MAILBOXES) and, on the agent side, the
-  // send window — a render check to our own inbox at 9pm harms nobody, and
-  // requiring one to wait until tomorrow morning would make verifying a
-  // campaign before launch impractical.
-  const seeds = due.filter(function (q) { return isSeedRecipientId_(q.recipient_id); });
-  const prospects = due.filter(function (q) { return !isSeedRecipientId_(q.recipient_id); });
+  // Neither seeds nor test sends are prospect touches: both bypass the daily
+  // allowance and, on the agent side, the send window — a render check or a
+  // test to a known address at 9pm harms nobody, and making one wait until
+  // tomorrow morning would make verifying anything impractical.
+  const synthetic = due.filter(function (q) { return isSyntheticRecipientId_(q.recipient_id); });
+  const prospects = due.filter(function (q) { return !isSyntheticRecipientId_(q.recipient_id); });
 
-  return seeds.concat(prospects.slice(0, allowance)).map(function (q) {
-    const isSeed = isSeedRecipientId_(q.recipient_id);
-    const recipient = isSeed ? syntheticSeedRecipient_(q.recipient_id) : findRow_('Recipients', q.recipient_id);
+  return synthetic.concat(prospects.slice(0, allowance)).map(function (q) {
+    const isSynthetic = isSyntheticRecipientId_(q.recipient_id);
+    const recipient = isSynthetic ? syntheticSeedRecipient_(q.recipient_id) : findRow_('Recipients', q.recipient_id);
     const campaign = findRow_('Campaigns', q.campaign_id);
     if (!recipient) return null;
-    if (!isSeed && (recipient.status === 'suppressed' || isSuppressed_(recipient.email))) return null;
+
+    // Suppression is skipped ONLY for seeds, which go to SEED_MAILBOXES — a
+    // fixed list of our own inboxes. A test send goes wherever the operator
+    // typed, so it is checked exactly like a real send: someone who has
+    // unsubscribed must not receive mail because it was labelled a test.
+    if (!isSeedRecipientId_(q.recipient_id)
+      && (recipient.status === 'suppressed' || isSuppressed_(recipient.email))) return null;
+
     return {
       queueId: q.id,
       campaign: campaign,
       recipient: recipient,
       idempotencyKey: q.idempotency_key,
       senderDisplayName: sender.display_name,
-      isSeed: isSeed,
+      skipSendWindow: isSynthetic,
     };
   }).filter(Boolean);
 }
@@ -399,7 +431,7 @@ function reportSent(email, secret, queueId, gmailMessageId) {
   if (q.status === 'sent') return; // idempotent — already recorded, agent retried the report
   updateRowAt_('Queue', q._row, { status: 'sent', sent_at: new Date(), sent_message_id: gmailMessageId });
   // Seed rows have no Recipients row to update — updateRow_ would throw.
-  if (!isSeedRecipientId_(q.recipient_id)) updateRow_('Recipients', q.recipient_id, { status: 'sent' });
+  if (!isSyntheticRecipientId_(q.recipient_id)) updateRow_('Recipients', q.recipient_id, { status: 'sent' });
   logEvent_(email, 'send', { campaignId: q.campaign_id, recipientId: q.recipient_id, senderEmail: email, detail: { queueId: queueId } });
 }
 
@@ -492,7 +524,7 @@ function reportFailed(email, secret, queueId, errorMessage) {
   const attempts = (q.attempts || 0) + 1;
   if (attempts >= GOVERNANCE.maxSendAttempts) {
     updateRowAt_('Queue', q._row, { status: 'failed', attempts: attempts, error: errorMessage });
-    if (!isSeedRecipientId_(q.recipient_id)) {
+    if (!isSyntheticRecipientId_(q.recipient_id)) {
       updateRow_('Recipients', q.recipient_id, { status: 'failed', status_reason: errorMessage });
     }
   } else {

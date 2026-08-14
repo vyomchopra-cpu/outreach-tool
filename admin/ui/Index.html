@@ -877,6 +877,61 @@
   }
   $('btnRefreshGrants').onclick = refreshGrants;
 
+  // ── test send: any address, any content, real send path ───────
+  function refreshTestSenders() {
+    google.script.run.withSuccessHandler(function (rows) {
+      const usable = rows.filter(function (s) { return s.canSend; });
+      $('testSender').innerHTML = usable.length
+        ? usable.map(function (s) {
+            return '<option value="' + esc(s.email) + '">' + esc(s.displayName || s.email)
+              + ' (' + esc(s.email) + ')</option>';
+          }).join('')
+        : '<option value="">nobody available — get an approval first</option>';
+      $('btnSendTest').disabled = !usable.length;
+    }).listAvailableSenders();
+  }
+  refreshTestSenders();
+
+  google.script.run.withSuccessHandler(function (s) {
+    $('testMergeHint').textContent = 'Merge tags resolve to ' + s.firstName + ' / ' + s.company + ' / ' + s.title + '.';
+  }).testSendMergeSample();
+
+  // The agent polls about once a minute, so the send has genuinely not
+  // happened when the button returns. Watch the queue row rather than
+  // claiming success at enqueue time.
+  function watchTestSend(queueId, tries) {
+    google.script.run.withSuccessHandler(function (r) {
+      if (r.status === 'sent') {
+        setMsg('testSendStatus', 'Delivered at ' + new Date(r.sentAt).toLocaleTimeString() + '. Check the inbox.', 'good');
+        return;
+      }
+      if (r.status === 'failed') {
+        setMsg('testSendStatus', 'Failed after ' + r.attempts + ' attempt(s): ' + r.error, 'bad');
+        return;
+      }
+      if (tries <= 0) {
+        setMsg('testSendStatus', 'Still queued. The agent polls about once a minute — '
+          + 'if it stays queued, that sender\'s agent is not running.', 'warn');
+        return;
+      }
+      setTimeout(function () { watchTestSend(queueId, tries - 1); }, 5000);
+    }).withFailureHandler(fail('testSendStatus')).getTestSendStatus(queueId);
+  }
+
+  $('btnSendTest').onclick = function () {
+    const to = $('testTo').value.trim();
+    if (!to) { setMsg('testSendStatus', 'Enter an address to send to.', 'bad'); return; }
+    $('btnSendTest').disabled = true;
+    setMsg('testSendStatus', 'Queued — waiting for the agent to pick it up…');
+    google.script.run.withSuccessHandler(function (r) {
+      $('btnSendTest').disabled = false;
+      watchTestSend(r.queueId, 24); // ~2 minutes
+    }).withFailureHandler(function (e) {
+      $('btnSendTest').disabled = false;
+      fail('testSendStatus')(e);
+    }).sendTestEmail($('testSender').value, to, $('testSubject').value, $('testHtml').value);
+  };
+
   // ── shared chrome ─────────────────────────────────────────────
   function applyKillSwitch(on) {
     const el = $('killSwitchState');

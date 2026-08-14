@@ -4,6 +4,37 @@
   Exists so routine operation never requires opening the code.
 -->
 <div class="card">
+  <h2><span class="num">✉</span> Send a test</h2>
+  <div class="hint">
+    A real email, to any address, with your own content — through the exact
+    render and send path a live campaign uses. Doesn't touch the daily cap,
+    ignores the send window, and never appears in your campaign list.
+  </div>
+  <div class="cols">
+    <div>
+      <label>Send as</label>
+      <select id="testSender"></select>
+      <label>To</label>
+      <input type="text" id="testTo" placeholder="anyone@anywhere.com">
+      <label>Subject</label>
+      <input type="text" id="testSubject" placeholder="Quick question about {{company}}">
+    </div>
+    <div>
+      <label>Body <span class="hint">HTML</span></label>
+      <textarea id="testHtml" rows="9" style="width:100%;font-family:ui-monospace,Consolas,monospace;font-size:12.5px"
+>&lt;p&gt;Hi {{firstName}},&lt;/p&gt;
+&lt;p&gt;Writing about {{company}}.&lt;/p&gt;
+&lt;p&gt;Best,&lt;br&gt;Vyom&lt;/p&gt;</textarea>
+    </div>
+  </div>
+  <div style="display:flex;gap:8px;margin-top:10px;align-items:center">
+    <button id="btnSendTest">Send it</button>
+    <span id="testMergeHint" class="hint"></span>
+  </div>
+  <div id="testSendStatus" class="msg"></div>
+</div>
+
+<div class="card">
   <h2><span class="num">⚙</span> Agent</h2>
   <div class="hint">Each sending exec runs their own agent inside their own Google account. These links act on whoever is signed in when they are opened — send them to the exec, do not open them yourself expecting to configure someone else.</div>
   <div id="agentLinks" class="hint">Loading…</div>

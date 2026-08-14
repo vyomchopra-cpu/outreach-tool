@@ -487,14 +487,46 @@ check('the live send path renders the preheader and leaves the subject unescaped
     throw new Error('subject is HTML-escaped at send time — recipients would see &amp; literally');
 });
 
-check('seed queue rows are resolved everywhere they are read (they have no Recipients row)', () => {
+check('synthetic queue rows are resolved everywhere they are read (they have no Recipients row)', () => {
+  // Two kinds now — seed: (our own mailboxes, pre-launch render check) and
+  // test: (any address, any content). Neither has a Recipients row, so every
+  // read path has to know. pollDueJobs originally did not: it looked the id
+  // up, got null, and silently dropped the send.
   const src = readFileSync('gateway/AgentApi.gs', 'utf8');
-  if (!/isSeedRecipientId_/.test(src)) throw new Error('no seed-row awareness — pollDueJobs would look a seed id up in Recipients, get null, and silently drop the send');
-  if (!/syntheticSeedRecipient_/.test(src)) throw new Error('no synthetic recipient for seed sends');
-  // reportSent/reportFailed must not try to update a Recipients row that cannot exist.
-  const reportSent = src.match(/function reportSent[\s\S]*?\n\}/);
-  if (reportSent && /updateRow_\('Recipients'/.test(reportSent[0]) && !/isSeedRecipientId_/.test(reportSent[0]))
-    throw new Error('reportSent updates Recipients unconditionally — throws on seed rows');
+  if (!/isSyntheticRecipientId_/.test(src)) throw new Error('no synthetic-row awareness in the gateway');
+  if (!/syntheticSeedRecipient_/.test(src)) throw new Error('no synthetic recipient builder');
+  // Must cover BOTH prefixes — guarding on seed alone would throw on test rows.
+  ['reportSent', 'reportFailed'].forEach(name => {
+    const fn = src.match(new RegExp('function ' + name + '[\\s\\S]*?\\n\\}'));
+    if (fn && /updateRow_\('Recipients'/.test(fn[0]) && !/isSyntheticRecipientId_/.test(fn[0]))
+      throw new Error(name + ' updates Recipients without the synthetic guard — throws on seed and test rows');
+  });
+});
+
+check('a test send is suppression-checked; only seeds skip it', () => {
+  // Seeds go to SEED_MAILBOXES, a fixed list of our own inboxes, so skipping
+  // suppression is harmless. A test send goes wherever the operator typed —
+  // possibly someone who unsubscribed. "It was only a test" is not a defence.
+  const gw = readFileSync('gateway/AgentApi.gs', 'utf8');
+  const poll = gw.match(/function pollDueJobs[\s\S]*?\n\}/);
+  if (!poll) throw new Error('pollDueJobs not found');
+  if (!/!isSeedRecipientId_\(q\.recipient_id\)[\s\S]{0,120}isSuppressed_/.test(poll[0]))
+    throw new Error('the suppression skip is not narrowed to seeds only — a test send could reach a suppressed address');
+
+  const admin = readFileSync('admin/TestSend.gs', 'utf8');
+  if (!/isSuppressed_\(/.test(admin))
+    throw new Error('sendTestEmail does not check suppression at enqueue time');
+});
+
+check('test sends never appear in the campaign list', () => {
+  // They are campaigns only as an implementation detail — reusing that
+  // machinery is what makes a test exercise the real send path — but they
+  // are not outreach, and would otherwise bury the real list within a day.
+  const src = readFileSync('admin/Campaign.gs', 'utf8');
+  const fn = src.match(/function listCampaigns[\s\S]*?\n\}/);
+  if (!fn) throw new Error('listCampaigns not found');
+  if (!/TEST_CAMPAIGN_STATUS/.test(fn[0]))
+    throw new Error('listCampaigns does not filter out test-send campaigns');
 });
 
 check('test-send route cannot be aimed at anyone but the signed-in user', () => {

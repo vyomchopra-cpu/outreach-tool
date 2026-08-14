@@ -132,9 +132,14 @@ function getCampaignReadiness(campaignId) {
 
 function listCampaigns() {
   requireAdmin_();
-  return readRows_('Campaigns').sort(function (a, b) {
-    return new Date(b.created_at) - new Date(a.created_at);
-  });
+  // Throwaway rows created by admin/TestSend.gs are campaigns only as an
+  // implementation detail — reusing the campaign machinery is what makes a
+  // test exercise the real send path. They are not outreach and must never
+  // appear alongside it, or the list fills with noise within a day.
+  return readRows_('Campaigns', function (c) { return c.status !== TEST_CAMPAIGN_STATUS; })
+    .sort(function (a, b) {
+      return new Date(b.created_at) - new Date(a.created_at);
+    });
 }
 
 /**
