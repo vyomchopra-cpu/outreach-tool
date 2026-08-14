@@ -152,6 +152,21 @@ function getDelegationLink(delegationId) {
   };
 }
 
+/**
+ * The link that restarts a sender's own polling agent.
+ *
+ * Needed because the trigger lives inside that person's Google account and
+ * only they can create it — an operator cannot repair someone else's agent,
+ * by the same design that stops this tool touching anyone's mailbox without
+ * them. What an operator CAN do is hand them the right link, and that should
+ * not involve assembling a URL by hand for each person; doing that manually
+ * has already broken twice.
+ */
+function agentRepairUrlFor_(senderEmail) {
+  const internal = String(senderEmail || '').toLowerCase().endsWith('@' + REPLY_TO_DOMAIN);
+  return (internal ? domainScopedUrl_(AGENT_WEBAPP_URL) : AGENT_WEBAPP_URL) + '?repair=1';
+}
+
 /** Everything the operator has asked for, newest first, with live state resolved from the Senders row. */
 function listDelegations() {
   requireAdmin_();

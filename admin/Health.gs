@@ -61,6 +61,11 @@ function getHealthSnapshot() {
       capToday: capToday,
       capUsedPct: capToday ? Math.round((sentToday / capToday) * 100) : 0,
       providerQuota: caps.providerQuota == null ? '—' : caps.providerQuota,
+      // "No recent heartbeat" is only useful if the next step is obvious.
+      // The trigger lives in that person's own account, so the fix is always
+      // "send them this and have them open it" — never something an operator
+      // can do for them. See agentRepairUrlFor_.
+      repairUrl: agentRepairUrlFor_(s.email),
     };
   });
 

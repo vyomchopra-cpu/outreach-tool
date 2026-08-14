@@ -111,6 +111,10 @@ function senderStatus() {
       sendsGrantedBy: s.sends_granted_by || null,
       sendsDaysLeft: (!sendsExpired && s.sends_expire_at)
         ? Math.ceil((new Date(s.sends_expire_at) - now) / 86400000) : null,
+      // Only actionable when stale, but always returned so the UI never has
+      // to assemble this URL itself — see agentRepairUrlFor_ for why that
+      // matters more than it looks.
+      repairUrl: agentRepairUrlFor_(s.email),
     };
   });
 }

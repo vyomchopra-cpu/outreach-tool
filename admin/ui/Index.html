@@ -633,6 +633,12 @@
           + '<div class="hint" style="margin-top:5px">' + x.sentToday + ' / ' + x.capToday + ' of today\'s cap'
           + '<div class="bar"><i style="width:' + pct + '%;background:'
           + (pct > 90 ? 'var(--warn)' : 'var(--good)') + '"></i></div></div>'
+          // A stale agent is fixed by that person opening a link in their own
+          // account — nobody else can do it for them — so put the link one
+          // click from the problem instead of in a doc somewhere.
+          + (x.stale ? '<div class="hint" style="margin-top:6px">'
+            + '<button class="secondary tiny" onclick="copyRepairLink(\'' + esc(x.repairUrl) + '\', \'' + esc(x.email) + '\')">copy restart link</button>'
+            + ' <span class="hint">send this to ' + esc(x.email) + ' — only they can restart their own agent</span></div>' : '')
           + '</span><span class="chip">' + esc(x.status) + '</span></div>';
       }).join('') : '<div class="empty">No senders onboarded.</div>';
 
@@ -702,6 +708,12 @@
     google.script.run.withSuccessHandler(function (r) {
       setMsg('monitorStatus', r.sent ? 'Sent — check the Chat space.' : 'Not sent — save a Chat webhook below first.', r.sent ? 'good' : 'warn');
     }).withFailureHandler(fail('monitorStatus')).sendTestAlert();
+  };
+
+  window.copyRepairLink = function (url, who) {
+    copyText(url, 'Restart link for ' + who);
+    setMsg('monitorStatus', 'Restart link for ' + who + ' copied. They must open it themselves, '
+      + 'signed in as ' + who + ' — the polling trigger lives in their own account.', 'good');
   };
 
   // ── alerts & keys: set here, never read back ──────────────────
