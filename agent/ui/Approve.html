@@ -143,6 +143,14 @@
       <p id="doneSummary"></p>
       <p class="muted">Sending stops automatically after that. You don't need
       to do anything to end it.</p>
+      <div id="triggerWarn" hidden style="background:var(--accent-soft);border-radius:9px;padding:14px 16px;margin-top:14px">
+        <p style="margin:0 0 8px"><b>One thing didn't finish.</b> Your approval is
+        recorded, but the part that actually checks for mail to send didn't
+        start.</p>
+        <p style="margin:0"><a href="?repair=1">Start it now</a> — safe to click
+        more than once.</p>
+        <p class="muted" id="triggerWarnDetail" style="font-size:12px;margin:8px 0 0"></p>
+      </div>
       <div class="row">
         <button id="btnRevoke" class="ghost">Stop sending now</button>
       </div>
@@ -342,6 +350,13 @@
           + (r.mode === 'per_campaign'
             ? ' You\'ll be asked to approve each campaign before it goes out.'
             : '');
+        // An approval that registers the sender but never starts its poll
+        // trigger produces a sender that looks live and does nothing. Say so
+        // here rather than letting it be discovered from a missing heartbeat.
+        if (r.trigger !== 'created') {
+          $('triggerWarn').hidden = false;
+          $('triggerWarnDetail').textContent = r.triggerError || '';
+        }
         if (r.filters === 'created automatically') {
           $('filterCard').hidden = true;
         } else {

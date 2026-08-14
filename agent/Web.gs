@@ -54,20 +54,48 @@ function doGet(e) {
    */
   if (p.whoami === '1') {
     const auth = getAuthStatus();
+    const triggers = countMyTickTriggers_();
     return html_(''
       + '<h3>Account check</h3>'
       + '<ul>'
       + '<li>Signed in as: <strong>' + email + '</strong></li>'
-      + '<li>Domain matches: <strong>' + (email.toLowerCase().endsWith('@' + REPLY_TO_DOMAIN) ? 'yes' : 'NO') + '</strong></li>'
+      + '<li>Allowed to use this tool: <strong>' + (isAllowedAgentUser_(email) ? 'yes' : 'NO') + '</strong></li>'
       + '<li>Extra authorization needed: <strong>' + (auth.required ? 'YES' : 'no') + '</strong></li>'
       + (auth.checkFailed ? '<li>Check failed: <code>' + auth.checkFailed + '</code></li>' : '')
+      + '<li>Send triggers you own: <strong>' + triggers + '</strong>'
+      + (triggers ? '' : ' — nothing will send until this is at least 1') + '</li>'
       + '</ul>'
       + (auth.authUrl
         ? '<p><a href="' + auth.authUrl + '" target="_blank" rel="noopener">Grant the missing permission</a>'
           + ' — then reload this page; it should say "no".</p>'
-        : '<p>Nothing further to grant from here.</p>')
+        : '')
+      + (triggers ? '' : '<p><a href="?repair=1"><strong>Start my sending agent</strong></a>'
+        + ' — safe to click more than once.</p>')
       + '<p style="color:#666;font-size:13px">Send a screenshot of this page to whoever asked you '
-      + 'to approve — it says exactly which account you are on and whether the permission is the problem.</p>');
+      + 'to approve — it says exactly which account you are on and what, if anything, is missing.</p>');
+  }
+
+  /**
+   * Re-runs the one-time setup an approval performs. Exists because that
+   * setup happens after the approval is already committed centrally, so a
+   * failure there leaves a sender that is active everywhere except where it
+   * matters — registered, shown as live, and never polling. Without a way to
+   * retry, the only fix was to revoke and re-approve from scratch.
+   */
+  if (p.repair === '1') {
+    let msg;
+    try {
+      ensureAgentTrigger_();
+      const n = countMyTickTriggers_();
+      msg = n
+        ? '<p style="color:#1c8558"><strong>Started.</strong> Your agent now checks for work every '
+          + AGENT_POLL_MINUTES + ' minute(s). Nothing else to do.</p>'
+        : '<p style="color:#b93a31">Setup reported success but no trigger exists afterwards. '
+          + 'Send this page to whoever asked you to approve.</p>';
+    } catch (err) {
+      msg = '<p style="color:#b93a31">Could not start it: ' + err.message + '</p>';
+    }
+    return html_('<h3>Sending agent</h3>' + msg + '<p><a href="?whoami=1">Re-check</a></p>');
   }
 
   if (p.diagnose === '1') {

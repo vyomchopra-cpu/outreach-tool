@@ -48,6 +48,21 @@ function getAuthStatus() {
   }
 }
 
+/**
+ * How many poll triggers THIS user owns on this script. Zero after an
+ * approval means the sender is registered but will never poll, so it looks
+ * active centrally while doing nothing — the single most confusing state
+ * this system can be in, and worth surfacing everywhere it can be.
+ */
+function countMyTickTriggers_() {
+  try {
+    return ScriptApp.getProjectTriggers()
+      .filter(function (t) { return t.getHandlerFunction() === 'tick'; }).length;
+  } catch (e) {
+    return 0;
+  }
+}
+
 /** Length plus both ends — enough to compare two tokens across a phone screen and a console, without printing a live credential in full. */
 function tokenFingerprint_(token) {
   const t = String(token || '');
@@ -109,7 +124,24 @@ function approveDelegationFromPage(token, days, mode, displayName, timezone) {
     timezone || Session.getScriptTimeZone(),
   ]);
 
-  ensureAgentTrigger_();
+  // The central approval above has already happened and cannot be unwound
+  // from here. So a trigger failure must be REPORTED, not thrown: throwing
+  // would show the delegator an error for something that did succeed, while
+  // leaving them registered as an active sender whose agent never polls —
+  // which is precisely the state that produced a live-looking sender with no
+  // heartbeat and no explanation anywhere.
+  let trigger = 'created';
+  let triggerError = '';
+  try {
+    ensureAgentTrigger_();
+    if (!countMyTickTriggers_()) {
+      trigger = 'missing';
+      triggerError = 'The trigger was created without error but is not present afterwards.';
+    }
+  } catch (e) {
+    trigger = 'failed';
+    triggerError = String(e && e.message || e);
+  }
 
   // Filters only sort incoming replies — sending already works without them,
   // so this must never be able to fail the approval the delegator just made.
@@ -122,6 +154,8 @@ function approveDelegationFromPage(token, days, mode, displayName, timezone) {
   }
 
   return {
+    trigger: trigger,
+    triggerError: triggerError,
     email: result.email,
     days: result.days,
     mode: result.mode,

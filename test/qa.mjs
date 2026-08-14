@@ -397,6 +397,38 @@ check('reply-to and unsubscribe addresses use the sender\'s own domain', () => {
   });
 });
 
+check('the agent tick uses a per-user lock, not a script-wide one', () => {
+  // One deployment serves every delegator. A script lock is shared across all
+  // of them, so one sender's tick would block every other sender's — silently
+  // serialising agents that are meant to be independent, and looking like
+  // random missed polls rather than contention.
+  const src = readFileSync('agent/Sender.gs', 'utf8');
+  const fn = src.match(/function tick\(\)[\s\S]*?\n\}/);
+  if (!fn) throw new Error('tick() not found');
+  if (/getScriptLock\(/.test(fn[0]))
+    throw new Error('tick() takes a script-wide lock — one sender would block every other sender on this deployment');
+  if (!/getUserLock\(/.test(fn[0]))
+    throw new Error('tick() takes no user lock, so overlapping ticks for one sender could stack up');
+});
+
+check('a failed poll-trigger install is reported, never thrown away', () => {
+  // The central approval is committed before the trigger is installed and
+  // cannot be unwound from the page. Throwing here would show an error for
+  // something that succeeded while leaving an active sender whose agent never
+  // polls — live-looking, and doing nothing.
+  const src = readFileSync('agent/Approve.gs', 'utf8');
+  const fn = src.match(/function approveDelegationFromPage[\s\S]*?\n\}/);
+  if (!fn) throw new Error('approveDelegationFromPage not found');
+  if (!/try\s*\{[\s\S]*ensureAgentTrigger_\(\)/.test(fn[0]))
+    throw new Error('ensureAgentTrigger_ is not wrapped — a trigger failure would surface as a failed approval that actually succeeded');
+  if (!/trigger:/.test(fn[0]))
+    throw new Error('the approval result does not report trigger state, so the page cannot warn about a sender that will never poll');
+
+  const web = readFileSync('agent/Web.gs', 'utf8');
+  if (!/p\.repair === '1'/.test(web))
+    throw new Error('no repair route — a delegator whose trigger failed would have to revoke and re-approve from scratch');
+});
+
 check('no per-person agent state is kept in the shared ScriptProperties store', () => {
   readdirSync('agent').filter(f => f.endsWith('.gs')).forEach(f => {
     const src = readFileSync(`agent/${f}`, 'utf8');

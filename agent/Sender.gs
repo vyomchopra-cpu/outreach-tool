@@ -5,7 +5,13 @@
  * before sending — README hard rule 6, "the guard lives in the agent."
  */
 function tick() {
-  const lock = LockService.getScriptLock();
+  // getUserLock, NOT getScriptLock. One deployment now serves every delegator
+  // (agent/Web.gs), and a script lock is shared across all of them — so one
+  // sender's tick would block every other sender's tick, turning independent
+  // agents into a single serialised queue. The thing being guarded is "don't
+  // let MY next tick start while MY last one is still running", which is
+  // exactly per-user.
+  const lock = LockService.getUserLock();
   if (!lock.tryLock(10000)) return; // a previous tick is still running — skip, don't stack up
   try {
     const email = getMyEmail_();
