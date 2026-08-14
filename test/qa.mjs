@@ -397,6 +397,46 @@ check('reply-to and unsubscribe addresses use the sender\'s own domain', () => {
   });
 });
 
+check('the self-test exercises the console\'s own functions, not a reimplementation of them', () => {
+  // The empty "Send as" dropdown is the case this exists for: the data was
+  // fine, the Sheet was fine, the gateway was fine — listAvailableSenders
+  // simply threw, the call site had no failure handler, and the control
+  // rendered blank and silent. Every infrastructure probe passed. Only
+  // calling the real function catches that.
+  const src = readFileSync('admin/SelfTest.gs', 'utf8');
+  const fn = src.match(/function probeConsoleFunctions_[\s\S]*?\n\}\n/);
+  if (!fn) throw new Error('probeConsoleFunctions_ not found');
+  ['listAvailableSenders', 'listDelegations', 'listCampaigns', 'senderStatus']
+    .forEach(name => {
+      if (!fn[0].includes(name + '()')) throw new Error(`probeConsoleFunctions_ does not call ${name}() — a console function nobody probes can break silently`);
+    });
+  if (!/function probeTestSendReadiness_/.test(src))
+    throw new Error('nothing probes whether a test send is actually possible, which is the most common thing an operator does');
+});
+
+check('every UI call that renders a control has a failure handler', () => {
+  // A google.script.run call with no failure handler fails invisibly: the
+  // success callback never runs, so whatever it was going to populate stays
+  // empty, and the operator sees a blank control rather than an error. That
+  // is how a dead "Send as" dropdown looked identical to an empty one.
+  const src = readFileSync('admin/ui/Index.html', 'utf8');
+  const CRITICAL = [
+    'listAvailableSenders', 'listDelegations', 'listCampaigns',
+    'getBootstrap', 'runSelfTest', 'runSelfTestAndRepair',
+  ];
+  const missing = CRITICAL.filter(name => {
+    // Take the chain leading up to this call: back to the google.script.run
+    // that starts it.
+    const idx = src.indexOf('.' + name + '(');
+    if (idx === -1) return false; // not wired up here at all
+    const start = src.lastIndexOf('google.script.run', idx);
+    if (start === -1) return true;
+    return !src.slice(start, idx).includes('withFailureHandler');
+  });
+  if (missing.length)
+    throw new Error('no failure handler, so these fail silently and leave a blank control: ' + missing.join(', '));
+});
+
 check('self-test repairs can only ever narrow what the system does', () => {
   // runSelfTestAndRepair is wired into a 15-minute trigger, so its repairs
   // run unattended. Anything that could GRANT — extend a window, register a

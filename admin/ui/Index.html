@@ -939,6 +939,14 @@
           }).join('')
         : '<option value="">nobody available — get an approval first</option>';
       $('btnSendTest').disabled = !usable.length;
+    }).withFailureHandler(function (err) {
+      // Without this the control rendered blank and silent when the call
+      // threw — no option, no message, nothing to act on. An empty dropdown
+      // and a broken one must never look the same.
+      $('testSender').innerHTML = '<option value="">could not load senders</option>';
+      $('btnSendTest').disabled = true;
+      setMsg('testSendStatus', 'Could not load the sender list: ' + clean(err.message)
+        + ' — run the Health tab\'s self-test for detail.', 'bad');
     }).listAvailableSenders();
   }
   refreshTestSenders();

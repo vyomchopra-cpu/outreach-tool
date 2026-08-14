@@ -247,6 +247,76 @@ function probeQueueFlow_() {
   });
 }
 
+/**
+ * Calls the console's own functions — the ones every screen depends on — and
+ * reports which throw.
+ *
+ * This is the probe that would have caught the empty "Send as" dropdown. That
+ * failed because listAvailableSenders threw and the call site had no failure
+ * handler, so the UI rendered an empty control and said nothing. From the
+ * operator's side the feature was simply dead, with no error anywhere: the
+ * worst possible failure mode, and invisible to every other probe here
+ * because the data underneath was perfectly fine.
+ *
+ * Deliberately calls the real functions rather than reimplementing their
+ * checks. A probe that approximates the code cannot catch the code being
+ * broken.
+ */
+function probeConsoleFunctions_() {
+  return safeProbe_('Console functions', function () {
+    const targets = [
+      ['listAvailableSenders', function () { return listAvailableSenders(); }],
+      ['listDelegations', function () { return listDelegations(); }],
+      ['listCampaigns', function () { return listCampaigns(); }],
+      ['senderStatus', function () { return senderStatus(); }],
+      ['listAccessGrants', function () { return listAccessGrants(); }],
+      ['getReoonStatus', function () { return getReoonStatus(); }],
+      ['getChatWebhookStatus', function () { return getChatWebhookStatus(); }],
+      ['testSendMergeSample', function () { return testSendMergeSample(); }],
+      ['getHealthSnapshot', function () { return getHealthSnapshot(); }],
+    ];
+    const broken = [];
+    targets.forEach(function (t) {
+      try {
+        t[1]();
+      } catch (e) {
+        broken.push(t[0] + '() throws: ' + (e && e.message || e));
+      }
+    });
+    return broken.length
+      ? probeResult_('Console functions', false, broken.join(' | '))
+      : probeResult_('Console functions', true, targets.length + ' console functions all responding');
+  });
+}
+
+/**
+ * Whether an operator could actually send a test right now — the single most
+ * common thing anyone does, and the thing that was silently impossible.
+ */
+function probeTestSendReadiness_() {
+  return safeProbe_('Test send available', function () {
+    let senders;
+    try {
+      senders = listAvailableSenders();
+    } catch (e) {
+      return probeResult_('Test send available', false,
+        'The sender list cannot be built at all: ' + (e && e.message || e));
+    }
+    const usable = senders.filter(function (s) { return s.canSend; });
+    if (!usable.length) {
+      const why = senders.length
+        ? senders.map(function (s) {
+            return s.email + ' (' + (s.permanent ? 'no expiry' : (s.daysLeft == null ? 'window ended' : s.daysLeft + 'd left')) + ')';
+          }).join(', ')
+        : 'no senders exist at all';
+      return probeResult_('Test send available', false,
+        'Nobody is selectable in "Send as", so no test can be sent. Senders: ' + why);
+    }
+    return probeResult_('Test send available', true,
+      usable.length + ' sender(s) selectable: ' + usable.map(function (s) { return s.email; }).join(', '));
+  });
+}
+
 /** The kill switch being on is not a fault, but silently forgetting it is on absolutely is. */
 function probeKillSwitch_() {
   return safeProbe_('Kill switch', function () {
@@ -268,6 +338,7 @@ function runSelfTest() {
 function runSelfTestProbes_() {
   const probes = [
     probeSchema_(), probeConfig_(), probeGateway_(), probeRendering_(),
+    probeConsoleFunctions_(), probeTestSendReadiness_(),
     probeSenders_(), probeDelegations_(), probeSuppressionIntegrity_(),
     probeQueueFlow_(), probeKillSwitch_(),
   ];
