@@ -220,13 +220,19 @@
 
 <script>
   /*
-    <?!= ?> not <?= ?>. The escaping form HTML-escapes its output, which
-    turns JSON.stringify's quotes into &quot; — and inside a <script> block
-    the browser does not decode entities, so the token arrives corrupted (or
-    the block fails to parse outright). JSON.stringify already produces a
-    valid, safely-quoted JS literal, and the server sanitises the token to
-    hex before it reaches here, so there is nothing left for HTML escaping
-    to protect against.
+    Printed with the RAW print tag, not the escaping one. The escaping form
+    HTML-escapes what it prints, which turns JSON.stringify's quotes into
+    &quot; — and a script block does not decode HTML entities, so the token
+    would arrive corrupted. JSON.stringify already yields a valid, quoted JS
+    literal, and agent/Web.gs restricts the token to hex characters before
+    it gets here, so escaping has nothing left to protect against.
+
+    Do NOT write Apps Script scriptlet delimiters anywhere in this file,
+    including inside comments like this one. The template engine scans the
+    whole file, not just markup: an empty scriptlet compiles to `output +=
+    ;` and throws "Unexpected token ';'" from the evaluate() call, which
+    points at Web.gs and gives no hint that the real cause is in here. That
+    is not hypothetical — a comment on this very line did it.
   */
   var TOKEN = <?!= JSON.stringify(token) ?>;
 

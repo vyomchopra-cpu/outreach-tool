@@ -290,6 +290,43 @@ check('every link handed to a human is Workspace-scoped, not account-ambiguous',
     throw new Error('domainScopedUrl_ is not idempotent — double-scoping an already-scoped URL would produce a dead link');
 });
 
+check('no HTML file contains an empty or malformed Apps Script scriptlet', () => {
+  // The template engine scans the ENTIRE file, not just markup — a scriptlet
+  // written inside a JS comment is still compiled. An empty one becomes
+  // `output += ;`, throwing "Unexpected token ';'" from evaluate(), reported
+  // against the .gs file that called it with nothing pointing back here.
+  //
+  // This shipped: a comment explaining the difference between the escaping
+  // and raw print tags wrote both of them out literally, and took the whole
+  // approval page down. The suite passed the entire time, because every
+  // check looked at .gs syntax and none looked at the templates.
+  const htmlFiles = [];
+  ['admin/ui', 'agent/ui'].forEach(dir => {
+    try {
+      readdirSync(dir).filter(f => f.endsWith('.html')).forEach(f => htmlFiles.push(`${dir}/${f}`));
+    } catch { /* directory may not exist in every project */ }
+  });
+  if (!htmlFiles.length) throw new Error('no UI templates found — this check would be silently vacuous');
+
+  htmlFiles.forEach(path => {
+    const src = readFileSync(path, 'utf8');
+    // Every scriptlet, whatever its form: <? ?>, <?= ?>, <?!= ?>
+    const scriptlets = [...src.matchAll(/<\?(!?=?)([\s\S]*?)\?>/g)];
+    scriptlets.forEach(m => {
+      if (!m[2].trim()) {
+        const line = src.slice(0, m.index).split('\n').length;
+        throw new Error(`${path}:${line} has an empty scriptlet "${m[0]}" — it compiles to invalid JS and breaks the whole page`);
+      }
+    });
+    // An unbalanced opener is the other way to produce a template that only
+    // fails at evaluate() time, long after any push or unit check.
+    const openers = (src.match(/<\?/g) || []).length;
+    const closers = (src.match(/\?>/g) || []).length;
+    if (openers !== closers)
+      throw new Error(`${path} has ${openers} scriptlet openers but ${closers} closers — the template will not compile`);
+  });
+});
+
 check('the approval token reaches the page uncorrupted by template escaping', () => {
   // <?= ?> HTML-escapes its output. Applied to JSON.stringify's quotes it
   // emits &quot;, and a <script> block does not decode entities — so the
