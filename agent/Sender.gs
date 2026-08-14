@@ -34,10 +34,47 @@ function tick() {
         Logger.log('scanSignals_ error: ' + signalErr.message);
       }
     }
+
+    recordTickOutcome_(true, '');
   } catch (e) {
     Logger.log('tick() error: ' + e.message);
+    recordTickOutcome_(false, e.message);
   } finally {
     lock.releaseLock();
+  }
+}
+
+/**
+ * Records the outcome of the last tick in this sender's own UserProperties,
+ * so ?whoami=1 can show it.
+ *
+ * Logger output is only readable by whoever can open the script project —
+ * which a delegator cannot, and should not have to. Without this, a tick
+ * that failed every single run was indistinguishable from a trigger that had
+ * never fired at all: both present as a heartbeat that stops advancing, and
+ * the two need completely different fixes. That ambiguity is what made a
+ * blank-email bug take this long to find.
+ */
+function recordTickOutcome_(ok, message) {
+  try {
+    const props = userProps_();
+    props.setProperty('LAST_TICK_AT', new Date().toISOString());
+    props.setProperty('LAST_TICK_OK', ok ? '1' : '0');
+    props.setProperty('LAST_TICK_ERROR', ok ? '' : String(message || '').slice(0, 400));
+  } catch (e) { /* diagnostics must never break the thing they describe */ }
+}
+
+/** What ?whoami=1 reports. Absent values mean the trigger has genuinely never run. */
+function lastTickStatus_() {
+  try {
+    const props = userProps_();
+    return {
+      at: props.getProperty('LAST_TICK_AT') || '',
+      ok: props.getProperty('LAST_TICK_OK') === '1',
+      error: props.getProperty('LAST_TICK_ERROR') || '',
+    };
+  } catch (e) {
+    return { at: '', ok: false, error: '' };
   }
 }
 

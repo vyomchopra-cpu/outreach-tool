@@ -397,6 +397,40 @@ check('reply-to and unsubscribe addresses use the sender\'s own domain', () => {
   });
 });
 
+check('the agent resolves its own identity in trigger context, not just in the web app', () => {
+  // Session.getActiveUser() returns "" inside a time-driven trigger,
+  // especially when the trigger's owner is not the script's owner — which is
+  // every delegator on this shared deployment. tick() then heartbeat'd with a
+  // blank email, the gateway answered "Unknown sender: ", and tick()'s catch
+  // swallowed it, leaving a registered sender whose heartbeat silently never
+  // advanced. getEffectiveUser() resolves correctly in both contexts.
+  const src = readFileSync('agent/CentralClient.gs', 'utf8');
+  const fn = src.match(/function getMyEmail_[\s\S]*?\n\}/);
+  if (!fn) throw new Error('getMyEmail_ not found');
+  if (!/getEffectiveUser\(\)/.test(fn[0]))
+    throw new Error('getMyEmail_ does not use getEffectiveUser() — it returns empty inside a trigger, so the agent never identifies itself');
+  const effIdx = fn[0].indexOf('getEffectiveUser');
+  const actIdx = fn[0].indexOf('getActiveUser');
+  if (actIdx !== -1 && actIdx < effIdx)
+    throw new Error('getActiveUser() is consulted before getEffectiveUser() — the trigger case must win');
+});
+
+check('a failing tick is recorded where the sender can see it', () => {
+  // tick() catches everything, so a tick that fails every run and a trigger
+  // that never fired are indistinguishable from outside — identical symptom,
+  // completely different fix. Logger is not readable by a delegator.
+  const src = readFileSync('agent/Sender.gs', 'utf8');
+  const fn = src.match(/function tick\(\)[\s\S]*?\n\}/);
+  if (!fn) throw new Error('tick() not found');
+  if (!/recordTickOutcome_\(false/.test(fn[0]))
+    throw new Error('tick() does not record its failures, so a silently failing agent looks identical to one that never ran');
+  if (!/recordTickOutcome_\(true/.test(fn[0]))
+    throw new Error('tick() does not record success, so "last check worked" can never be shown');
+  const web = readFileSync('agent/Web.gs', 'utf8');
+  if (!/p\.tick === '1'/.test(web))
+    throw new Error('no route to run a poll on demand — diagnosis would mean waiting on the timer to learn nothing');
+});
+
 check('the agent tick uses a per-user lock, not a script-wide one', () => {
   // One deployment serves every delegator. A script lock is shared across all
   // of them, so one sender's tick would block every other sender's — silently

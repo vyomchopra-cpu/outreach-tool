@@ -21,7 +21,26 @@
  * gateway/AgentApi.gs's synced copy) does that.
  */
 
+/**
+ * Whose agent this is — and it has to be right in TWO very different
+ * contexts, which is where this went wrong.
+ *
+ * In the web app (executeAs USER_ACCESSING) the visitor is both the active
+ * and the effective user, so either call works. In a time-driven trigger
+ * there is no active user at all: getActiveUser() returns an empty string,
+ * particularly when the trigger's owner is not the script's owner — which is
+ * every delegator on this shared deployment. getEffectiveUser() is the one
+ * that resolves in both, returning the identity the code is actually running
+ * as.
+ *
+ * The failure this caused was near-invisible: tick() called heartbeat with a
+ * blank email, the gateway answered "Unknown sender: ", tick()'s catch
+ * swallowed it into Logger, and the console showed a registered, active
+ * sender whose heartbeat simply never advanced. Nothing anywhere said why.
+ */
 function getMyEmail_() {
+  const effective = Session.getEffectiveUser().getEmail();
+  if (effective) return effective;
   return Session.getActiveUser().getEmail();
 }
 

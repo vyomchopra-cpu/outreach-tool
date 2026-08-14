@@ -46,15 +46,39 @@ function doGet(e) {
   }
 
   /**
-   * Deliberately touches nothing but Session and ScriptApp — no network, no
-   * Gmail, no gateway. ?diagnose=1 cannot answer "why did this fail" when
-   * the failure IS the network call, because it needs the same permission
-   * that is missing. This route still renders when everything else is
-   * broken, which is the only time anyone needs it.
+   * Runs one poll immediately, in the browser, where the result is visible.
+   *
+   * Waiting for the timer only ever answered "still nothing", because tick()
+   * catches everything and writes to a log a delegator cannot open. Running
+   * it here surfaces the same outcome in front of whoever is trying to fix
+   * it — the difference between "the trigger never fired" and "it fires and
+   * fails every time" is the whole diagnosis, and those look identical from
+   * the console.
+   */
+  if (p.tick === '1') {
+    tick();
+    const after = lastTickStatus_();
+    return html_('<h3>Check run</h3>'
+      + (after.ok
+        ? '<p style="color:#1c8558"><strong>Worked.</strong> Your agent reached the system and reported in.</p>'
+        : '<p style="color:#b93a31"><strong>Failed:</strong> ' + (after.error || 'no detail recorded') + '</p>')
+      + '<p><a href="?whoami=1">Back to the account check</a></p>');
+  }
+
+  /**
+   * Deliberately touches nothing but Session, ScriptApp and UserProperties —
+   * no network, no Gmail, no gateway. ?diagnose=1 cannot answer "why did this
+   * fail" when the failure IS the network call, because it needs the same
+   * permission that is missing. This route still renders when everything else
+   * is broken, which is the only time anyone needs it.
    */
   if (p.whoami === '1') {
     const auth = getAuthStatus();
     const triggers = countMyTickTriggers_();
+    // NOT named `tick` — a const by that name shadows the global tick()
+    // across this whole function, putting the ?tick=1 route's call into the
+    // temporal dead zone and throwing before it can run.
+    const tickStatus = lastTickStatus_();
     return html_(''
       + '<h3>Account check</h3>'
       + '<ul>'
@@ -64,7 +88,13 @@ function doGet(e) {
       + (auth.checkFailed ? '<li>Check failed: <code>' + auth.checkFailed + '</code></li>' : '')
       + '<li>Send triggers you own: <strong>' + triggers + '</strong>'
       + (triggers ? '' : ' — nothing will send until this is at least 1') + '</li>'
+      + '<li>Last check: ' + (tickStatus.at
+        ? '<strong>' + tickStatus.at + '</strong> — ' + (tickStatus.ok
+          ? '<span style="color:#1c8558">worked</span>'
+          : '<span style="color:#b93a31">FAILED: ' + tickStatus.error + '</span>')
+        : '<strong>never run</strong>') + '</li>'
       + '</ul>'
+      + '<p><a href="?tick=1"><strong>Run a check now</strong></a> — does not wait for the timer.</p>'
       + (auth.authUrl
         ? '<p><a href="' + auth.authUrl + '" target="_blank" rel="noopener">Grant the missing permission</a>'
           + ' — then reload this page; it should say "no".</p>'
