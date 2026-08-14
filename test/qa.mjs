@@ -397,6 +397,37 @@ check('reply-to and unsubscribe addresses use the sender\'s own domain', () => {
   });
 });
 
+check('every element id the console script touches exists in some template', () => {
+  // This is the highest-consequence, lowest-visibility bug shape in the whole
+  // UI. `$('missingId').onclick = fn` at top level throws a TypeError, which
+  // aborts the REST OF THE SCRIPT — so a feature hundreds of lines further
+  // down simply never initialises, with no error on screen and nothing in the
+  // page to suggest a connection.
+  //
+  // It shipped exactly that way: rewriting the Access tab dropped
+  // btnRefreshGrants, whose unguarded handler sat 15 lines above the test-send
+  // wiring. The "Send as" dropdown rendered permanently blank, and every
+  // other probe passed, because nothing was broken except that the code
+  // filling it never ran.
+  const idx = readFileSync('admin/ui/Index.html', 'utf8');
+  const script = idx.slice(idx.indexOf('<script>'));
+  const referenced = new Set([...script.matchAll(/\$\('([A-Za-z0-9_]+)'\)/g)].map(m => m[1]));
+
+  const defined = new Set();
+  readdirSync('admin/ui').filter(f => f.endsWith('.html')).forEach(f => {
+    const s = readFileSync(`admin/ui/${f}`, 'utf8');
+    [...s.matchAll(/id="([A-Za-z0-9_]+)"/g)].forEach(m => defined.add(m[1]));
+  });
+
+  // A reference guarded by `if ($('x'))` is a deliberate optional lookup.
+  const missing = [...referenced].filter(id => {
+    if (defined.has(id)) return false;
+    return !new RegExp(`if\\s*\\(\\s*\\$\\('${id}'\\)`).test(script);
+  });
+  if (missing.length)
+    throw new Error('referenced by the script but defined in no template, so the script aborts at the first one: ' + missing.join(', '));
+});
+
 check('the self-test exercises the console\'s own functions, not a reimplementation of them', () => {
   // The empty "Send as" dropdown is the case this exists for: the data was
   // fine, the Sheet was fine, the gateway was fine — listAvailableSenders
