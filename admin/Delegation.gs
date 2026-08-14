@@ -162,6 +162,35 @@ function getDelegationLink(delegationId) {
  * not involve assembling a URL by hand for each person; doing that manually
  * has already broken twice.
  */
+/**
+ * Clears a sender's stored key so their agent can register again.
+ *
+ * The recovery valve for an agent that can no longer authenticate — a local
+ * secret lost, cleared, or (as happened here) stranded by a change in where
+ * it was stored. Before this there was no way back: the agent could not
+ * authenticate with the wrong secret and could not re-register either,
+ * because registration refuses an email that already has a row.
+ *
+ * Safe for an operator to hold, because it only ever REMOVES the ability to
+ * act. It grants nothing: the sender still has to re-register from their own
+ * account, and their sending window is untouched — this cannot extend it.
+ */
+function resetSenderKey(email) {
+  const admin = requireAdmin_();
+  const clean = String(email || '').toLowerCase().trim();
+  const sender = findRow_('Senders', clean);
+  if (!sender) throw new Error('No such sender: ' + clean);
+
+  updateRow_('Senders', clean, { secret_hash: '' });
+  logEvent_(admin, 'admin_action', { senderEmail: clean, detail: { action: 'reset_sender_key' } });
+  return { email: clean, reonboardUrl: agentReonboardUrlFor_(clean) };
+}
+
+function agentReonboardUrlFor_(senderEmail) {
+  const internal = String(senderEmail || '').toLowerCase().endsWith('@' + REPLY_TO_DOMAIN);
+  return (internal ? domainScopedUrl_(AGENT_WEBAPP_URL) : AGENT_WEBAPP_URL) + '?onboard=1';
+}
+
 function agentRepairUrlFor_(senderEmail) {
   const internal = String(senderEmail || '').toLowerCase().endsWith('@' + REPLY_TO_DOMAIN);
   return (internal ? domainScopedUrl_(AGENT_WEBAPP_URL) : AGENT_WEBAPP_URL) + '?repair=1';

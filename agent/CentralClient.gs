@@ -71,6 +71,53 @@ function getOrCreateSecret_() {
 }
 
 /**
+ * The secret as it was stored BEFORE this deployment became multi-tenant.
+ *
+ * Moving per-person state from ScriptProperties to UserProperties was the
+ * right change — a shared store meant the second sender to onboard silently
+ * clobbered the first — but it was made without migrating what was already
+ * there. Existing agents therefore found nothing in UserProperties, minted a
+ * brand-new secret, and started failing every call with "Bad secret", because
+ * the Senders row still held the hash of the old one. Nothing about that
+ * error suggested a storage move was the cause.
+ */
+function legacyScriptSecret_() {
+  try {
+    return PropertiesService.getScriptProperties().getProperty('CENTRAL_SECRET') || '';
+  } catch (e) {
+    return '';
+  }
+}
+
+/**
+ * Recovers from that migration by TESTING the old secret rather than assuming
+ * it belongs to whoever is running.
+ *
+ * That distinction matters on a shared deployment: the legacy value sits in a
+ * store every user can read, so adopting it blindly would hand one sender's
+ * credential to another. Instead it is offered to the gateway, which checks
+ * it against the Senders row for THIS email specifically — so it can only
+ * ever be adopted by the account it actually belonged to. Everyone else's
+ * attempt is rejected and nothing is written.
+ *
+ * Returns true if the secret was recovered and stored.
+ */
+function adoptLegacySecretIfValid_() {
+  const legacy = legacyScriptSecret_();
+  if (!legacy) return false;
+  const props = userProps_();
+  if (props.getProperty('CENTRAL_SECRET') === legacy) return false; // already using it
+
+  const email = getMyEmail_();
+  const probe = callCentralRaw_('heartbeat', [email, legacy, AGENT_VERSION, currentCapabilities_()]);
+  if (!probe || !probe.ok) return false;
+
+  props.setProperty('CENTRAL_SECRET', legacy);
+  Logger.log('Adopted pre-multi-tenant secret for ' + email);
+  return true;
+}
+
+/**
  * Posts to the gateway and returns the raw {ok, result, error} envelope
  * without throwing. Callers that care about the distinction between "the pipe
  * is broken" and "the pipe works and the answer was no" use this directly.

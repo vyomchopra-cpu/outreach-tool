@@ -15,9 +15,21 @@ function tick() {
   if (!lock.tryLock(10000)) return; // a previous tick is still running — skip, don't stack up
   try {
     const email = getMyEmail_();
-    const secret = getOrCreateSecret_();
+    let secret = getOrCreateSecret_();
 
-    const hb = callCentral_('heartbeat', [email, secret, AGENT_VERSION, currentCapabilities_()]);
+    // An agent that predates multi-tenancy holds its secret in the old
+    // location, so its first call here fails authentication through no fault
+    // of the operator or the sender. Recover once, silently, rather than
+    // requiring every existing sender to be manually re-keyed.
+    let hbRaw = callCentralRaw_('heartbeat', [email, secret, AGENT_VERSION, currentCapabilities_()]);
+    if (hbRaw && !hbRaw.ok && /bad secret/i.test(String(hbRaw.error))) {
+      if (adoptLegacySecretIfValid_()) {
+        secret = getOrCreateSecret_();
+        hbRaw = callCentralRaw_('heartbeat', [email, secret, AGENT_VERSION, currentCapabilities_()]);
+      }
+    }
+    if (!hbRaw || !hbRaw.ok) throw new Error('Central API error (heartbeat): ' + (hbRaw && hbRaw.error));
+    const hb = hbRaw.result;
     if (hb.killSwitch) { Logger.log('Kill switch on — idle.'); return; }
     if (hb.status !== 'active') { Logger.log('Sender status is ' + hb.status + ' — idle.'); return; }
 

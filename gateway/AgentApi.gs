@@ -53,7 +53,13 @@ function registerSender(email, secretPlain, displayName, timezone) {
   const allowed = SENDER_POOL.some(function (s) { return s.email === email; });
   if (!allowed) throw new Error(email + ' is not in SENDER_POOL — an admin must add it (shared/Config.gs) before this account can register');
   const existing = findRow_('Senders', email);
-  if (existing) throw new Error('Sender already registered: ' + email + ' — contact an admin to re-key');
+  // A blank secret_hash means an admin has deliberately cleared it
+  // (admin/Delegation.gs resetSenderKey) precisely so this agent can re-key.
+  // Without that, an agent whose local secret is lost or unreadable is stuck
+  // forever: it cannot authenticate, and it cannot re-register either.
+  if (existing && existing.secret_hash) {
+    throw new Error('Sender already registered: ' + email + ' — ask an admin to reset the key first');
+  }
   upsertRow_('Senders', {
     email: email,
     display_name: displayName,

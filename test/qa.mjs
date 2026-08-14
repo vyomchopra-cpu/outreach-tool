@@ -464,11 +464,30 @@ check('a failed poll-trigger install is reported, never thrown away', () => {
 });
 
 check('no per-person agent state is kept in the shared ScriptProperties store', () => {
+  // One documented exception: legacyScriptSecret_ READS the pre-multi-tenant
+  // location so an existing agent can recover its own secret. Reading is
+  // safe; the value is only adopted after the gateway confirms it belongs to
+  // the calling account. Writing per-person state there is what caused the
+  // original clobbering bug and stays banned outright.
   readdirSync('agent').filter(f => f.endsWith('.gs')).forEach(f => {
     const src = readFileSync(`agent/${f}`, 'utf8');
-    if (/getScriptProperties\(\)/.test(src))
-      throw new Error(`agent/${f} uses getScriptProperties() — that store is shared across every delegator using this deployment; use userProps_() instead`);
+    const legacyReader = src.match(/function legacyScriptSecret_[\s\S]*?\n\}/);
+    const withoutException = legacyReader ? src.replace(legacyReader[0], '') : src;
+
+    if (/getScriptProperties\(\)/.test(withoutException))
+      throw new Error(`agent/${f} uses getScriptProperties() outside legacyScriptSecret_ — that store is shared across every delegator on this deployment; use userProps_() instead`);
+
+    if (legacyReader && /setProperty|deleteProperty/.test(legacyReader[0]))
+      throw new Error('legacyScriptSecret_ writes to ScriptProperties — it may only read the legacy value');
   });
+
+  // The adoption path must verify with the gateway rather than trusting the
+  // shared store, or one sender would inherit another's credential.
+  const client = readFileSync('agent/CentralClient.gs', 'utf8');
+  const adopt = client.match(/function adoptLegacySecretIfValid_[\s\S]*?\n\}/);
+  if (!adopt) throw new Error('adoptLegacySecretIfValid_ not found');
+  if (!/callCentralRaw_\(/.test(adopt[0]))
+    throw new Error('the legacy secret is adopted without asking the gateway to validate it — on a shared deployment that hands one sender another sender\'s credential');
 });
 
 check('only admin/Store.gs (and its synced copy) may reference SpreadsheetApp', () => {
