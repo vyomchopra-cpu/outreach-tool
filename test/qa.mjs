@@ -211,15 +211,18 @@ check('approveDelegation records the delegator themselves as the grantor, never 
     throw new Error('sends_granted_by is set to the REQUESTER — that is precisely the inversion this tool exists to prevent');
 });
 
-check('the claim token is single-use: burned on both approve and deny', () => {
+check('a delegation can only be decided once', () => {
+  // Single-use is enforced by the status guard, not by destroying the token.
+  // Overwriting it made "already approved" indistinguishable from "never
+  // existed", so a mistyped link and a spent one produced identical advice.
   const src = readFileSync('gateway/AgentApi.gs', 'utf8');
   ['approveDelegation', 'denyDelegation'].forEach(name => {
     const fn = src.match(new RegExp('function ' + name + '[\\s\\S]*?\\n\\}'));
     if (!fn) throw new Error(name + ' not found');
-    if (!/claim_token:\s*'used:'/.test(fn[0]))
-      throw new Error(name + ' does not burn the claim token — the approval link would stay replayable after use');
     if (!/status !== 'pending'/.test(fn[0]))
-      throw new Error(name + ' does not re-check status, so a double-click could decide an already-decided request');
+      throw new Error(name + ' does not re-check status, so a stale tab or double-click could decide an already-decided request');
+    if (!/updateRow_\('Delegations'/.test(fn[0]))
+      throw new Error(name + ' never moves the row off "pending", so the guard above could never fire');
   });
 });
 

@@ -794,6 +794,15 @@
   $('btnRefreshSenders').onclick = refreshSenders;
   refreshSenders();
 
+  // Re-copy the exact link for any still-pending request, so nobody ever has
+  // to reconstruct one by hand — that has broken it twice.
+  window.copyDelegationLink = function (id) {
+    google.script.run.withSuccessHandler(function (r) {
+      copyText(r.url, 'Link for ' + r.delegatorEmail);
+      setMsg('dgStatus', 'Link for ' + r.delegatorEmail + ' copied. Send it as-is — don\'t edit it.', 'good');
+    }).withFailureHandler(fail('dgStatus')).getDelegationLink(id);
+  };
+
   window.revokeDelegationRow = function (id, who) {
     if (!confirm('Stop ' + who + ' being used as a sender, right now?\n\nGoing longer again means asking them for a fresh approval.')) return;
     google.script.run.withSuccessHandler(function () {
@@ -816,6 +825,7 @@
           + '<div class="hint">' + esc(sub) + '</div></span>'
           + '<span style="display:flex;gap:8px;align-items:center">'
           + '<span class="chip ' + chip + '">' + esc(label) + '</span>'
+          + (r.status === 'pending' ? '<button class="secondary tiny" onclick="copyDelegationLink(\'' + esc(r.id) + '\')">copy link</button>' : '')
           + (r.live ? '<button class="secondary tiny" onclick="revokeDelegationRow(\'' + esc(r.id) + '\', \'' + esc(r.delegatorEmail) + '\')">stop</button>' : '')
           + '</span></div>';
       }).join('') : '<div class="empty">No requests yet.</div>';

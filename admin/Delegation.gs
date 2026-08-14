@@ -128,6 +128,26 @@ function delegationInviteText(delegationId) {
     + 'Thanks,\n' + who;
 }
 
+/**
+ * Re-fetch the link for a request that is still pending. Exists because the
+ * alternative is a human retyping or trimming a 64-character token out of a
+ * URL, which has now gone wrong twice: once truncated by hand-editing, once
+ * broken by removing a path segment. A link the operator can always re-copy
+ * exactly makes both impossible.
+ */
+function getDelegationLink(delegationId) {
+  requireAdmin_();
+  const row = findRow_('Delegations', delegationId);
+  if (!row) throw new Error('No such request: ' + delegationId);
+  if (row.status !== 'pending') {
+    throw new Error('That request is ' + row.status + ' — its link no longer does anything. Create a new one.');
+  }
+  return {
+    url: delegationApprovalUrl_(row.claim_token, row.delegator_email),
+    delegatorEmail: row.delegator_email,
+  };
+}
+
 /** Everything the operator has asked for, newest first, with live state resolved from the Senders row. */
 function listDelegations() {
   requireAdmin_();

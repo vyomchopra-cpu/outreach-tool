@@ -97,11 +97,23 @@ function registerSender(email, secretPlain, displayName, timezone) {
  * could NOT send anything. Sending requires the delegator's own OAuth grant
  * inside their own Google account, which no token can forge.
  */
+/**
+ * The token stays on the row after a decision rather than being overwritten.
+ * Single-use is enforced by the status check in approve/deny, not by
+ * destroying the key — and keeping it means "already approved" and "never
+ * existed" stay distinguishable. When they were not, a link that had simply
+ * been mistyped reported the same thing as one that had been used, and the
+ * only available advice was "ask for a fresh one" no matter which had
+ * happened.
+ */
 function findDelegationByToken_(token) {
   const clean = String(token || '').trim();
   if (!clean) throw new Error('Missing approval token');
-  const rows = readRows_('Delegations', function (r) { return r.claim_token === clean; });
-  if (!rows.length) throw new Error('This approval link is not valid. Ask for a fresh one.');
+  const rows = readRows_('Delegations', function (r) { return String(r.claim_token).trim() === clean; });
+  if (!rows.length) {
+    throw new Error('This approval link is not recognised — it looks incomplete or mistyped. '
+      + 'Ask for the link to be sent again, and open it without editing it.');
+  }
   return rows[0];
 }
 
@@ -173,7 +185,6 @@ function approveDelegation(token, assertedEmail, secretPlain, days, mode, displa
 
   // Burn the token in the same step that grants the capability.
   updateRow_('Delegations', row.id, {
-    claim_token: 'used:' + row.id,
     status: 'approved',
     days_approved: n,
     approval_mode: mode,
@@ -196,7 +207,7 @@ function denyDelegation(token, assertedEmail) {
   if (row.status !== 'pending') throw new Error('This request was already ' + row.status + '.');
 
   updateRow_('Delegations', row.id, {
-    claim_token: 'used:' + row.id, status: 'denied', decided_at: new Date(),
+    status: 'denied', decided_at: new Date(),
   });
   logEvent_(row.delegator_email, 'admin_action', {
     senderEmail: row.delegator_email,
