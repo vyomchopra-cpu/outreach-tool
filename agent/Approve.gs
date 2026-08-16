@@ -172,6 +172,22 @@ function denyDelegationFromPage(token) {
   return { requestedByName: prettyNameFromEmail_(result.requestedBy) };
 }
 
+/** Campaigns awaiting this person's proof-read, fully rendered. Empty for anyone on blanket approval. */
+function getMyPendingCampaigns() {
+  try {
+    return callCentral_('pendingCampaignsForSender', [getMyEmail_(), getOrCreateSecret_()]);
+  } catch (e) {
+    // Never let this break the dashboard — someone who has not approved
+    // anything yet has no sender row, which is not an error condition.
+    return { wantsReview: false, campaigns: [], error: String(e && e.message || e) };
+  }
+}
+
+function decideMyCampaign(campaignId, approve, note) {
+  return callCentral_('decideCampaignAsSender',
+    [getMyEmail_(), getOrCreateSecret_(), campaignId, !!approve, note || '']);
+}
+
 /** Instant, unilateral, no admin involvement — the promise made in docs/EXEC_CONSENT.md, reachable from the delegator's own page. */
 function revokeMyDelegation() {
   const email = getMyEmail_();
@@ -180,18 +196,45 @@ function revokeMyDelegation() {
   return { revoked: email };
 }
 
-/** Their own current state — "am I lending my name to anything right now, and until when." */
+/**
+ * Everything the delegator's own dashboard shows: am I lending my name right
+ * now, until when, how much has gone out, who is sending it, and how to sort
+ * the replies.
+ *
+ * Never throws for the ordinary case of "not a sender". Someone who has never
+ * approved anything, or whose window has ended, is not an error — they are the
+ * majority of people who will ever open this page, and an exception screen
+ * would be both alarming and wrong.
+ */
 function getMyDelegationStatus() {
   const email = getMyEmail_();
-  const status = callCentral_('senderSelfStatus', [email, getOrCreateSecret_()]);
-  return {
+  const base = {
     myEmail: email,
-    canSend: status.canSend,
-    expiresAt: status.expiresAt,
-    daysLeft: status.daysLeft,
-    sentCount: status.sentCount,
-    lastSentAt: status.lastSentAt,
-    operators: status.operators,
+    registered: false,
+    canSend: false,
+    expiresAt: null, daysLeft: null,
+    sentCount: 0, lastSentAt: null, operators: [],
+    replyToAddress: replyToAddress_(),
     filterSpec: manualFilterSpec_(),
+    error: '',
   };
+
+  let status;
+  try {
+    status = callCentral_('senderSelfStatus', [email, getOrCreateSecret_()]);
+  } catch (e) {
+    const msg = String(e && e.message || e);
+    // "Unknown sender" is the normal never-approved case, not a failure.
+    if (!/unknown sender/i.test(msg)) base.error = msg;
+    return base;
+  }
+
+  base.registered = true;
+  base.canSend = status.canSend;
+  base.expiresAt = status.expiresAt;
+  base.daysLeft = status.daysLeft;
+  base.sentCount = status.sentCount;
+  base.lastSentAt = status.lastSentAt;
+  base.operators = status.operators || [];
+  return base;
 }

@@ -263,6 +263,101 @@ function senderSelfStatus(email, secret) {
 }
 
 /**
+ * Campaigns waiting on this sender's sign-off, with enough substance to
+ * actually judge them: the real subject, the fully rendered body, and who it
+ * is going to.
+ *
+ * "Show me each campaign first" is worthless as a checkbox. Someone who chose
+ * that option wants to proof-read what will be published under their name —
+ * so returning "campaign c47 is pending, approve y/n" would technically honour
+ * the setting while defeating its entire purpose. The rendering here goes
+ * through the same render_() the live send uses, so what they read is what
+ * will go out, not an approximation of it.
+ */
+function pendingCampaignsForSender(email, secret) {
+  requireSender_(email, secret);
+
+  // Only meaningful for someone who asked to review each one. A delegator on
+  // blanket approval should never be shown a queue of things to tick.
+  const wantsReview = readRows_('Delegations', function (d) {
+    return d.delegator_email === email && d.status === 'approved' && d.approval_mode === 'per_campaign';
+  }).length > 0;
+  if (!wantsReview) return { wantsReview: false, campaigns: [] };
+
+  const campaigns = readRows_('Campaigns', function (c) {
+    if (c.status === TEST_CAMPAIGN_STATUS || c.status === 'completed' || c.status === 'halted') return false;
+    if (c.exec_approved_at) return false;
+    return String(c.sender_pool || '').split(',').indexOf(email) !== -1;
+  });
+
+  return {
+    wantsReview: true,
+    campaigns: campaigns.map(function (c) {
+      const recipients = readRows_('Recipients', function (r) { return r.campaign_id === c.id; });
+      const sample = recipients[0] || {
+        first_name: 'Sam', last_name: 'Prospect', company: 'Example Corp',
+        title: 'VP Engineering', custom: {},
+      };
+      let preview = { html: '', subject: c.subject, error: '' };
+      try {
+        const rendered = render_(c.body_source, sample,
+          { unsubscribe: email.split('@')[0] + '+unsub@' + email.split('@')[1] },
+          { preheader: c.preheader });
+        preview.html = rendered.html;
+        preview.subject = applyMerge_(c.subject,
+          mergeDataForRecipient_(sample, {}), { escape: false });
+      } catch (e) {
+        preview.error = 'This campaign does not currently render: ' + e.message;
+      }
+      return {
+        id: c.id,
+        name: c.name,
+        createdBy: c.created_by,
+        subject: preview.subject,
+        html: preview.html,
+        renderError: preview.error,
+        recipientCount: recipients.length,
+        // A sample, not the list. Enough to see who this is aimed at without
+        // turning an approval page into a data export.
+        recipientSample: recipients.slice(0, 8).map(function (r) {
+          return { email: r.email, company: r.company || '', title: r.title || '' };
+        }),
+      };
+    }),
+  };
+}
+
+/**
+ * The sender's own decision on one campaign. Recorded against their
+ * authenticated identity, exactly like the delegation approval it descends
+ * from — an operator cannot make this call on their behalf.
+ */
+function decideCampaignAsSender(email, secret, campaignId, approve, note) {
+  requireSender_(email, secret);
+  const c = findRow_('Campaigns', campaignId);
+  if (!c) throw new Error('No such campaign: ' + campaignId);
+  if (String(c.sender_pool || '').split(',').indexOf(email) === -1) {
+    throw new Error('This campaign does not send under your name');
+  }
+  if (c.exec_approved_at) throw new Error('This campaign was already approved by ' + c.exec_approved_by);
+
+  if (approve) {
+    updateRow_('Campaigns', campaignId, {
+      exec_approved_by: email, exec_approved_at: new Date(),
+    });
+  } else {
+    // Refusal halts it outright rather than leaving it pending, so a "no"
+    // cannot be quietly waited out until someone else approves.
+    updateRow_('Campaigns', campaignId, { status: 'halted' });
+  }
+  logEvent_(email, approve ? 'consent' : 'halt', {
+    campaignId: campaignId, senderEmail: email,
+    detail: { action: approve ? 'exec_approve_campaign' : 'exec_reject_campaign', note: note || '' },
+  });
+  return { approved: !!approve, campaignId: campaignId };
+}
+
+/**
  * Lets the delegator stop everything themselves, from their own page, with no
  * admin in the loop. Authenticated by the sender secret their own agent holds
  * — no claim token needed, since the token is long since burned by the time

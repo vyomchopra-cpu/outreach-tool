@@ -1,0 +1,339 @@
+<!--
+  The delegator's own page — what someone sees at the bare agent URL once
+  they have lent their name to something.
+
+  This used to be a list of debug links (?diagnose=1, ?onboard=1 …), which is
+  the wrong content for the wrong audience: the person most likely to open
+  this URL is an exec checking what is being sent as them, not an operator
+  debugging an agent. Approving without any way to see the consequences
+  afterwards asks people to take it purely on trust, and the whole argument
+  for this tool is that they should not have to.
+
+  The Gmail filter setup lives here rather than only on the approval page,
+  because "how do I keep track of the replies" is a question people have
+  later, not in the thirty seconds while they are approving something.
+-->
+<style>
+  :root {
+    --ink: #14191c; --muted: #55676a; --paper: #f6f8f8; --panel: #fff;
+    --line: #dfe6e5; --accent: #0e7c86; --accent-soft: #e4f2f2;
+    --good: #1c8558; --good-soft: #e6f4ed; --bad: #b93a31; --bad-soft: #fbeae8;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ink: #e8eded; --muted: #93a4a5; --paper: #0d1315; --panel: #161e20;
+      --line: #263030; --accent: #55d6dc; --accent-soft: #16302f;
+      --good: #4fc590; --good-soft: #12241f; --bad: #ea7a72; --bad-soft: #2b1614;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ink: #e8eded; --muted: #93a4a5; --paper: #0d1315; --panel: #161e20;
+    --line: #263030; --accent: #55d6dc; --accent-soft: #16302f;
+    --good: #4fc590; --good-soft: #12241f; --bad: #ea7a72; --bad-soft: #2b1614;
+  }
+  :root[data-theme="light"] {
+    --ink: #14191c; --muted: #55676a; --paper: #f6f8f8; --panel: #fff;
+    --line: #dfe6e5; --accent: #0e7c86; --accent-soft: #e4f2f2;
+    --good: #1c8558; --good-soft: #e6f4ed; --bad: #b93a31; --bad-soft: #fbeae8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 15px; line-height: 1.65; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 620px; margin: 0 auto; padding: 32px 20px 64px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 22px 24px; margin-bottom: 16px;
+  }
+  h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  p { margin: 10px 0; }
+  .muted { color: var(--muted); font-size: 13.5px; }
+  .who { font-family: var(--mono); font-size: 13px; color: var(--muted); }
+
+  .state { display: flex; align-items: center; gap: 10px; margin: 14px 0 4px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .state.on .dot { background: var(--good); }
+  .state.off .dot { background: var(--muted); }
+  .state strong { font-size: 17px; }
+
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;
+    background: var(--line); border: 1px solid var(--line);
+    border-radius: 10px; overflow: hidden; margin-top: 18px; }
+  .stats > div { background: var(--panel); padding: 13px 14px; }
+  .stats b { display: block; font-family: var(--mono); font-size: 19px;
+    font-variant-numeric: tabular-nums; }
+  .stats span { font-size: 11.5px; color: var(--muted); }
+
+  button {
+    padding: 11px 18px; font-size: 15px; font-weight: 600; font-family: inherit;
+    border-radius: 9px; border: 1px solid var(--line); cursor: pointer;
+    background: transparent; color: var(--ink);
+  }
+  button.danger { color: var(--bad); border-color: currentColor; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .filter { border: 1px solid var(--line); border-radius: 9px; padding: 13px 15px; margin-top: 10px; }
+  .filter code {
+    display: block; margin-top: 6px; padding: 8px 10px; background: var(--paper);
+    border-radius: 6px; font-size: 12.5px; word-break: break-all; font-family: var(--mono);
+  }
+  .review { border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; margin-top: 14px; }
+  .review h3 { font-size: 15px; margin: 0 0 2px; }
+  .review .subj { font-size: 15px; margin: 12px 0 0; }
+  .review .subj b { font-weight: 600; }
+  /* The rendered email, isolated so campaign HTML cannot restyle this page.
+     Scrollable rather than clipped: a proof-read has to show all of it. */
+  .body-preview {
+    border: 1px solid var(--line); border-radius: 8px; margin-top: 10px;
+    background: #fff; color: #111; padding: 14px 16px;
+    max-height: 340px; overflow: auto; font-size: 14px; line-height: 1.55;
+  }
+  .body-preview img { max-width: 100%; height: auto; }
+  .recips { margin-top: 12px; font-size: 13px; }
+  .recips table { width: 100%; border-collapse: collapse; }
+  .recips td { padding: 4px 6px; border-bottom: 1px solid var(--line); color: var(--muted); }
+  .review .actions { display: flex; gap: 9px; margin-top: 14px; flex-wrap: wrap; }
+  .review button { padding: 9px 15px; font-size: 14px; }
+  .review button.ok { background: var(--accent); color: #fff; border-color: transparent; }
+  .msg { font-size: 14px; margin-top: 12px; }
+  .msg.good { color: var(--good); }
+  .msg.bad { color: var(--bad); }
+  details { margin-top: 20px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  details ul { font-size: 13px; color: var(--muted); padding-left: 18px; }
+  .spinner { text-align: center; color: var(--muted); padding: 44px 0; }
+  [hidden] { display: none !important; }
+</style>
+
+<div class="wrap">
+  <div id="loading" class="spinner">Loading…</div>
+
+  <div id="main" hidden>
+    <div class="card">
+      <h1>Sending from your account</h1>
+      <div class="who" id="myEmail"></div>
+
+      <div class="state" id="stateRow">
+        <span class="dot"></span>
+        <strong id="stateText"></strong>
+      </div>
+      <div class="muted" id="stateDetail"></div>
+
+      <div class="stats" id="stats" hidden>
+        <div><b id="statSent">0</b><span>sent as you</span></div>
+        <div><b id="statDays">—</b><span>days left</span></div>
+        <div><b id="statWho">—</b><span>sending</span></div>
+      </div>
+
+      <div id="stopWrap" hidden style="margin-top:20px">
+        <button id="btnStop" class="danger">Stop sending now</button>
+        <div class="muted" style="margin-top:8px">
+          Takes effect immediately. Nobody else is involved and no explanation
+          is needed. To go again afterwards, they have to ask you fresh.
+        </div>
+      </div>
+      <div id="stopMsg" class="msg"></div>
+    </div>
+
+    <div class="card" id="reviewCard" hidden>
+      <h2>Waiting for you to read</h2>
+      <p class="muted">
+        You asked to see each campaign before it goes out. Nothing below has
+        been sent to anyone, and nothing will until you approve it.
+      </p>
+      <div id="reviewList"></div>
+    </div>
+
+    <div class="card">
+      <h2>Keeping track of replies</h2>
+      <p class="muted">
+        Replies come to your inbox as ordinary mail. These optional Gmail
+        filters group them under labels so they are easy to find — and easy to
+        leave alone. Nothing but you can read them.
+      </p>
+      <p class="muted">
+        In Gmail: <strong>Settings</strong> (gear) →
+        <strong>See all settings</strong> →
+        <strong>Filters and Blocked Addresses</strong> →
+        <strong>Create a new filter</strong>. Paste the line below into the
+        matching field, click <strong>Create filter</strong>, then tick the
+        actions. Gmail offers to create each label the first time.
+      </p>
+      <div id="filterList"></div>
+      <p class="muted" style="margin-top:14px">
+        Filters never apply to your Sent folder, so messages sent under your
+        name still appear there as normal — they genuinely are your mail.
+      </p>
+    </div>
+
+    <details>
+      <summary>Technical checks</summary>
+      <ul>
+        <li><a href="?whoami=1">Account and permission check</a></li>
+        <li><a href="?tick=1">Run a check now</a></li>
+        <li><a href="?repair=1">Restart my sending agent</a></li>
+        <li><a href="?diagnose=1">Full diagnostics</a></li>
+      </ul>
+    </details>
+  </div>
+
+  <div id="errView" hidden>
+    <div class="card">
+      <h1>Couldn't load this</h1>
+      <p class="msg bad" id="errMsg"></p>
+      <p class="muted">Try <a href="?whoami=1">the account check</a>, which
+      works even when this page does not.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+  function $(id) { return document.getElementById(id); }
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function render(d) {
+    $('myEmail').textContent = d.myEmail;
+
+    if (d.canSend) {
+      $('stateRow').className = 'state on';
+      $('stateText').textContent = 'Active';
+      var until = d.expiresAt
+        ? new Date(d.expiresAt).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })
+        : null;
+      $('stateDetail').textContent = until
+        ? 'Emails can go out under your name until ' + until + '. After that it stops on its own.'
+        : 'Emails can go out under your name.';
+      $('stats').hidden = false;
+      $('statSent').textContent = d.sentCount;
+      $('statDays').textContent = d.daysLeft == null ? '—' : d.daysLeft;
+      $('statWho').textContent = d.operators.length;
+      $('stopWrap').hidden = false;
+    } else if (d.registered) {
+      $('stateRow').className = 'state off';
+      $('stateText').textContent = 'Stopped';
+      $('stateDetail').textContent = 'Nothing can be sent under your name right now. '
+        + (d.sentCount ? d.sentCount + ' message(s) went out while it was active.' : '');
+      $('stats').hidden = !d.sentCount;
+      $('statSent').textContent = d.sentCount;
+      $('statDays').textContent = '0';
+      $('statWho').textContent = d.operators.length;
+    } else {
+      $('stateRow').className = 'state off';
+      $('stateText').textContent = 'Not active';
+      $('stateDetail').textContent = 'You have not given anyone permission to send under your name. '
+        + 'If someone has asked you to, they will have sent you a separate approval link.';
+    }
+
+    if (d.operators.length) {
+      $('stateDetail').textContent += ' Sending is being run by ' + d.operators.join(', ') + '.';
+    }
+
+    $('filterList').innerHTML = d.filterSpec.map(function (f) {
+      return '<div class="filter"><strong>Label: ' + esc(f.label) + '</strong>'
+        + '<div class="muted">' + esc(f.why) + '</div>'
+        + '<code>' + esc(f.criterion) + '</code>'
+        + '<div class="muted" style="margin-top:6px">Then tick: '
+        + f.actions.map(esc).join(', ') + '</div></div>';
+    }).join('');
+
+    $('loading').hidden = true;
+    $('main').hidden = false;
+  }
+
+  google.script.run
+    .withSuccessHandler(render)
+    .withFailureHandler(function (e) {
+      $('loading').hidden = true;
+      $('errMsg').textContent = (e && e.message) || String(e);
+      $('errView').hidden = false;
+    })
+    .getMyDelegationStatus();
+
+  // ── campaigns awaiting a proof-read ──────────────────────────
+  function renderReviews(d) {
+    if (!d.wantsReview || !d.campaigns.length) { $('reviewCard').hidden = true; return; }
+    $('reviewCard').hidden = false;
+    $('reviewList').innerHTML = d.campaigns.map(function (c, i) {
+      var recips = c.recipientSample.length
+        ? '<div class="recips"><table>' + c.recipientSample.map(function (r) {
+            return '<tr><td>' + esc(r.email) + '</td><td>' + esc(r.company) + '</td><td>' + esc(r.title) + '</td></tr>';
+          }).join('') + '</table>'
+          + (c.recipientCount > c.recipientSample.length
+            ? '<div class="muted" style="margin-top:6px">…and ' + (c.recipientCount - c.recipientSample.length) + ' more</div>'
+            : '') + '</div>'
+        : '<div class="muted" style="margin-top:10px">No recipients imported yet.</div>';
+
+      return '<div class="review" id="rev-' + i + '">'
+        + '<h3>' + esc(c.name) + '</h3>'
+        + '<div class="muted">Set up by ' + esc(c.createdBy) + ' · going to '
+        + c.recipientCount + ' recipient(s)</div>'
+        + '<div class="subj"><b>Subject:</b> ' + esc(c.subject) + '</div>'
+        + (c.renderError
+          ? '<div class="msg bad">' + esc(c.renderError) + '</div>'
+          : '<div class="body-preview">' + c.html + '</div>')
+        + recips
+        + '<div class="actions">'
+        + '<button class="ok" onclick="decideCampaign(\'' + esc(c.id) + '\', true, ' + i + ')">Approve and send</button>'
+        + '<button onclick="decideCampaign(\'' + esc(c.id) + '\', false, ' + i + ')">Reject</button>'
+        + '</div><div class="msg" id="revmsg-' + i + '"></div></div>';
+    }).join('');
+  }
+
+  window.decideCampaign = function (id, approve, i) {
+    if (!approve && !confirm('Reject this campaign? It will be stopped, not left waiting.')) return;
+    var box = $('rev-' + i);
+    box.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+    google.script.run
+      .withSuccessHandler(function () {
+        box.querySelector('.actions').remove();
+        var m = $('revmsg-' + i);
+        m.textContent = approve
+          ? 'Approved. This will start sending under your name.'
+          : 'Rejected. This campaign has been stopped.';
+        m.className = 'msg ' + (approve ? 'good' : 'bad');
+      })
+      .withFailureHandler(function (e) {
+        box.querySelectorAll('button').forEach(function (b) { b.disabled = false; });
+        var m = $('revmsg-' + i);
+        m.textContent = (e && e.message) || String(e);
+        m.className = 'msg bad';
+      })
+      .decideMyCampaign(id, approve, '');
+  };
+
+  google.script.run
+    .withSuccessHandler(renderReviews)
+    .withFailureHandler(function () { $('reviewCard').hidden = true; })
+    .getMyPendingCampaigns();
+
+  $('btnStop').onclick = function () {
+    if (!confirm('Stop all sending under your name, right now?')) return;
+    $('btnStop').disabled = true;
+    $('btnStop').textContent = 'Stopping…';
+    google.script.run
+      .withSuccessHandler(function () {
+        $('stateRow').className = 'state off';
+        $('stateText').textContent = 'Stopped';
+        $('stateDetail').textContent = 'Nothing further can be sent under your name.';
+        $('stopWrap').hidden = true;
+        $('stopMsg').textContent = 'Stopped. You can close this page.';
+        $('stopMsg').className = 'msg good';
+      })
+      .withFailureHandler(function (e) {
+        $('btnStop').disabled = false;
+        $('btnStop').textContent = 'Stop sending now';
+        $('stopMsg').textContent = (e && e.message) || String(e);
+        $('stopMsg').className = 'msg bad';
+      })
+      .revokeMyDelegation();
+  };
+</script>

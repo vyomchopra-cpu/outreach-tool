@@ -30,6 +30,8 @@ const AGENT_API_ACTIONS = {
   denyDelegation: denyDelegation,
   senderSelfStatus: senderSelfStatus,
   revokeOwnDelegation: revokeOwnDelegation,
+  pendingCampaignsForSender: pendingCampaignsForSender,
+  decideCampaignAsSender: decideCampaignAsSender,
 };
 
 function doPost(e) {

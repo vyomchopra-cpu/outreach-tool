@@ -156,6 +156,26 @@ function doGet(e) {
       + '<p>To resume, visit <code>?onboard=1</code> again.</p>');
   }
 
+  /**
+   * The default page is the DELEGATOR's dashboard, not an operator menu.
+   *
+   * Whoever opens this URL without a parameter is overwhelmingly likely to be
+   * someone checking what is being sent under their name — not an engineer
+   * debugging an agent. It previously showed a list of ?diagnose / ?onboard
+   * links, which answered none of the questions that person actually has and
+   * asked them to trust the tool with no way to look. The technical routes
+   * are still here, one fold down, behind a disclosure.
+   */
+  if (p.menu === '1') return legacyOperatorMenu_(email);
+
+  const dash = HtmlService.createTemplateFromFile('ui/Dashboard');
+  return dash.evaluate()
+    .setTitle('Sending from your account')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+/** Kept for reference: the old operator menu, reachable at ?menu=1 for anyone who wants it. */
+function legacyOperatorMenu_(email) {
   return html_(''
     + '<h3>MIS Outreach — sender agent</h3>'
     + '<p>Signed in as <strong>' + email + '</strong></p>'
