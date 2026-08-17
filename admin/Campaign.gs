@@ -106,6 +106,7 @@ function getCampaignReadiness(campaignId) {
     ? (new Date() - new Date(c.seed_passed_at)) / 3600000
     : null;
   const seedFresh = seedAgeHours !== null && seedAgeHours <= GOVERNANCE.seedSendMaxAgeHours;
+  const approval = execApprovalStatus_(c);
 
   return {
     exists: true,
@@ -122,10 +123,14 @@ function getCampaignReadiness(campaignId) {
           : (seedFresh ? Math.round(seedAgeHours) + 'h ago' : 'expired — re-send and confirm again') },
       { key: 'recipients', done: recipients.length > 0, label: 'Recipients imported',
         hint: recipients.length + ' imported' },
-      { key: 'approved', done: !!c.exec_approved_at, label: 'Exec approved',
-        hint: c.exec_approved_by || 'a named sender must approve' },
+      { key: 'approved', done: approval.ok, label: 'Sender approved',
+        hint: approval.ok
+          ? (approval.via === 'blanket'
+            ? 'covered by their standing approval'
+            : 'approved by ' + approval.approvedBy)
+          : approval.reason },
     ],
-    canLaunch: preflight.ok && seedFresh && recipients.length > 0 && !!c.exec_approved_at,
+    canLaunch: preflight.ok && seedFresh && recipients.length > 0 && approval.ok,
     recipientCount: recipients.length,
   };
 }

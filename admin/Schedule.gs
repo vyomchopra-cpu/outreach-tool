@@ -103,7 +103,13 @@ function assertLaunchGatesClear_(campaign) {
   if (seedAgeHours > GOVERNANCE.seedSendMaxAgeHours) {
     throw new Error('Seed pass is ' + Math.round(seedAgeHours) + 'h old, exceeds the ' + GOVERNANCE.seedSendMaxAgeHours + 'h freshness window — re-seed');
   }
-  if (!campaign.exec_approved_at) throw new Error('No exec has approved this campaign yet');
+  // Not a bare exec_approved_at check: a sender on blanket approval already
+  // gave their permission when they granted the delegation, and is
+  // deliberately never shown a per-campaign review queue. Requiring an
+  // explicit approval from them is a gate with nobody on the other side.
+  // See execApprovalStatus_ in admin/Delegation.gs.
+  const approval = execApprovalStatus_(campaign);
+  if (!approval.ok) throw new Error('Not approved to send yet — ' + approval.reason);
 }
 
 /** Schedules only the first 5 recipients (by import order) and holds everything else back. */

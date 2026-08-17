@@ -258,6 +258,55 @@ function revokeDelegation(delegationId) {
 }
 
 /**
+ * Whether every sender on a campaign has signed off on it, and if not, who is
+ * outstanding.
+ *
+ * Two ways a sender can have approved, and conflating them broke launching
+ * entirely:
+ *
+ *   'per_campaign' — they asked to read each one, so they must explicitly
+ *                    approve THIS campaign on their own dashboard.
+ *   'blanket'      — they said "get on with it" when they granted the
+ *                    delegation. That WAS the approval, for everything inside
+ *                    the window. Demanding a second, per-campaign one from
+ *                    them is not extra safety, it is a gate nobody can open:
+ *                    blanket delegators are deliberately not shown a review
+ *                    queue, and a non-admin exec has no other route in. Every
+ *                    blanket campaign was unlaunchable.
+ *
+ * A sender with no delegation at all (self-onboarded, sending under their own
+ * name) still needs the explicit approval — nobody has pre-authorised
+ * anything on their behalf.
+ */
+function execApprovalStatus_(campaign) {
+  const pool = String(campaign.sender_pool || '').split(',').filter(Boolean);
+  if (!pool.length) return { ok: false, pending: [], reason: 'no sender assigned' };
+  if (campaign.exec_approved_at) {
+    return { ok: true, pending: [], via: 'explicit', approvedBy: campaign.exec_approved_by };
+  }
+
+  const now = new Date();
+  const senders = {};
+  readRows_('Senders').forEach(function (s) { senders[s.email] = s; });
+
+  const blanket = {};
+  readRows_('Delegations', function (d) {
+    return d.status === 'approved' && d.approval_mode === 'blanket';
+  }).forEach(function (d) {
+    const s = senders[d.delegator_email];
+    // An expired window is not standing permission for anything.
+    const live = s && s.status === 'active'
+      && (!s.sends_expire_at || new Date(s.sends_expire_at) > now);
+    if (live) blanket[d.delegator_email] = true;
+  });
+
+  const pending = pool.filter(function (email) { return !blanket[email]; });
+  return pending.length
+    ? { ok: false, pending: pending, reason: 'waiting on ' + pending.join(', ') }
+    : { ok: true, pending: [], via: 'blanket' };
+}
+
+/**
  * Who can I actually send as right now — the one question the Senders tab
  * exists to answer. Derived from Senders (the live state), annotated with the
  * approval that produced it.

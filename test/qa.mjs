@@ -397,6 +397,41 @@ check('reply-to and unsubscribe addresses use the sender\'s own domain', () => {
   });
 });
 
+check('a blanket delegation actually permits launching', () => {
+  // Launch used to demand campaign.exec_approved_at unconditionally. Blanket
+  // delegators are deliberately never shown a per-campaign review queue, and
+  // a non-admin exec has no other way in — so every blanket campaign was
+  // permanently unlaunchable, with the readiness rail reporting "a named
+  // sender must approve" and no one able to.
+  const del = readFileSync('admin/Delegation.gs', 'utf8');
+  const fn = del.match(/function execApprovalStatus_[\s\S]*?\n\}/);
+  if (!fn) throw new Error('execApprovalStatus_ not found');
+  if (!/approval_mode === 'blanket'/.test(fn[0]))
+    throw new Error('blanket delegations are not treated as standing approval');
+  if (!/sends_expire_at/.test(fn[0]))
+    throw new Error('an expired window would still count as standing approval — it must not');
+
+  const sched = readFileSync('admin/Schedule.gs', 'utf8');
+  const gate = sched.match(/function assertLaunchGatesClear_[\s\S]*?\n\}/);
+  if (!gate) throw new Error('assertLaunchGatesClear_ not found');
+  if (!/execApprovalStatus_\(/.test(gate[0]))
+    throw new Error('the launch gate checks exec_approved_at directly instead of resolving blanket vs per-campaign approval');
+});
+
+check('a per-campaign delegator must still approve each campaign explicitly', () => {
+  // The other half: blanket must not become a loophole that waves through
+  // someone who specifically asked to read every campaign first.
+  const src = readFileSync('gateway/AgentApi.gs', 'utf8');
+  const fn = src.match(/function pendingCampaignsForSender[\s\S]*?\n\}/);
+  if (!fn) throw new Error('pendingCampaignsForSender not found');
+  if (!/approval_mode === 'per_campaign'/.test(fn[0]))
+    throw new Error('the review queue is not restricted to delegators who asked for per-campaign review');
+  const del = readFileSync('admin/Delegation.gs', 'utf8');
+  const status = del.match(/function execApprovalStatus_[\s\S]*?\n\}/)[0];
+  if (/per_campaign/.test(status) && !/blanket/.test(status))
+    throw new Error('per_campaign senders are being treated as pre-approved');
+});
+
 check('the admin console never resolves identity from the effective user', () => {
   // The console runs executeAs USER_DEPLOYING so that Sheet access happens as
   // the owner — which is what lets a colleague use it without being given raw
