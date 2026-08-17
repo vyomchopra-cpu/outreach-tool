@@ -161,7 +161,34 @@ const ADMIN_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbzkVMxLpWszLRq
 const REOON_API_KEY = '';
 const REOON_MODE = 'quick';
 
-const AGENT_VERSION = '0.15.0'; // bump alongside package.json's version — see docs/RELEASE_PROCESS.md
+/**
+ * Open and click tracking.
+ *
+ * Both were deliberately absent until now, and the reasoning is still worth
+ * knowing rather than just reversing: a tracking pixel is one of the clearer
+ * signals that mail is bulk, and open rates are far less trustworthy than
+ * they look. Apple Mail Privacy Protection pre-fetches images on the
+ * recipient's behalf, so a large and unknowable share of "opens" are machines
+ * that no human ever read. Gmail proxies images too. At a 20/day cap the
+ * sample is small enough that this noise can swamp the signal.
+ *
+ * So they are recorded honestly rather than flatteringly:
+ *   - an open logged within OPEN_MACHINE_WINDOW_SEC of the send is marked
+ *     machine-suspected, because humans rarely open in under a few seconds
+ *   - unique and total are reported separately, never merged
+ *   - clicks are reported alongside, and are the number to trust: a click is
+ *     a deliberate human action that no privacy proxy performs
+ *
+ * Turning either off is a one-word change and needs no other edits — the
+ * renderer simply stops injecting, and existing data stays valid.
+ */
+const TRACK_OPENS = true;
+const TRACK_CLICKS = true;
+
+/** An "open" faster than this after sending is almost certainly a prefetch, not a person. */
+const OPEN_MACHINE_WINDOW_SEC = 10;
+
+const AGENT_VERSION = '0.16.0'; // bump alongside package.json's version — see docs/RELEASE_PROCESS.md
 
 /**
  * Which send path the agent uses — see agent/Transport.gs.

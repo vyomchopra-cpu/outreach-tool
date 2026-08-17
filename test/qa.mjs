@@ -397,6 +397,84 @@ check('reply-to and unsubscribe addresses use the sender\'s own domain', () => {
   });
 });
 
+check('the tracked-link endpoint is not an open redirect', () => {
+  // This endpoint lives on script.google.com and takes a destination as a
+  // parameter. Without a scheme check, anyone could hand out a Google-domain
+  // link that forwards wherever they like, borrowing that domain's
+  // credibility — a textbook open redirect, and an especially attractive one.
+  const src = readFileSync('gateway/Tracking.gs', 'utf8');
+  const fn = src.match(/function handleTrackedLink_[\s\S]*?\n\}/);
+  if (!fn) throw new Error('handleTrackedLink_ not found');
+  if (!/\^https\?:\\\/\\\//.test(fn[0]))
+    throw new Error('the redirect target is not restricted to http(s) — javascript: and data: targets would be forwarded, and any host could be cloaked behind our domain');
+  if (!/if \(!safe\)/.test(fn[0]))
+    throw new Error('an unsafe target is not refused before redirecting');
+});
+
+check('tracking never rewrites the unsubscribe link', () => {
+  // An opt-out has to work even if the gateway is down. Routing it through
+  // our own redirect to count a click trades a compliance guarantee for a
+  // metric, which is not a trade worth making.
+  const src = readFileSync('shared/Tracking.gs', 'utf8');
+  const fn = src.match(/function shouldTrackLink_[\s\S]*?\n\}/);
+  if (!fn) throw new Error('shouldTrackLink_ not found');
+  if (!/unsub/i.test(fn[0]))
+    throw new Error('unsubscribe links are not excluded from click tracking');
+  if (!/\^https\?:\\\/\\\//.test(fn[0]))
+    throw new Error('non-http links (mailto:, tel:, #) are not excluded, so rewriting would break them');
+});
+
+check('tracking URLs carry an opaque id, never the recipient address', () => {
+  // Query strings end up in mail-client logs, proxies and browser history.
+  // Putting an address there leaks who was mailed to anyone who sees a URL.
+  const shared = readFileSync('shared/Tracking.gs', 'utf8');
+  ['trackingPixelUrl_', 'trackedLinkUrl_'].forEach(name => {
+    const fn = shared.match(new RegExp('function ' + name + '[\\s\\S]*?\\n\\}'));
+    if (!fn) throw new Error(name + ' not found');
+    if (/email|recipient/i.test(fn[0]))
+      throw new Error(name + ' references an address — tracking URLs must carry only an opaque id');
+  });
+});
+
+check('a tracking request can only ever append to the log', () => {
+  // These handlers are reachable anonymously by anyone on the internet. The
+  // entire blast radius must be one appended row.
+  const src = readFileSync('gateway/Tracking.gs', 'utf8');
+  ['updateRow_', 'upsertRow_', 'setKillSwitch_', 'sendMessage_'].forEach(bad => {
+    if (new RegExp('\\b' + bad + '\\(').test(src))
+      throw new Error(`gateway/Tracking.gs calls ${bad}() — an anonymous endpoint must not be able to change state`);
+  });
+  if (!/appendRow_\('Tracking'/.test(src))
+    throw new Error('tracking events are not appended to the Tracking tab');
+});
+
+check('open rates separate machine prefetches from people', () => {
+  // Apple Mail Privacy Protection loads images on the recipient's behalf. An
+  // open rate that silently counts those is not measuring humans, and
+  // reporting it as if it were would be the dishonest default.
+  const analytics = readFileSync('admin/Analytics.gs', 'utf8');
+  if (!/humanOpenRate/.test(analytics))
+    throw new Error('no human-only open rate is computed');
+  if (!/machine_suspected/.test(analytics))
+    throw new Error('machine-suspected opens are not distinguished in reporting');
+  const tracking = readFileSync('gateway/Tracking.gs', 'utf8');
+  if (!/OPEN_MACHINE_WINDOW_SEC/.test(tracking))
+    throw new Error('nothing flags an open that arrives implausibly fast after the send');
+});
+
+check('CSV export quotes fields that would otherwise corrupt the file', () => {
+  // A company name containing a comma, or an error string containing a
+  // newline, silently shifts every later column — the classic way to produce
+  // an export that looks fine and is wrong.
+  const src = readFileSync('admin/Analytics.gs', 'utf8');
+  const fn = src.match(/function csvCell_[\s\S]*?\n\}/);
+  if (!fn) throw new Error('csvCell_ not found');
+  if (!/\[",\\n\\r\]/.test(fn[0]))
+    throw new Error('csvCell_ does not detect commas, quotes and newlines');
+  if (!/replace\(\/"\/g, '""'\)/.test(fn[0]))
+    throw new Error('csvCell_ does not double embedded quotes, which is how RFC-4180 escapes them');
+});
+
 check('every element id the console script touches exists in some template', () => {
   // This is the highest-consequence, lowest-visibility bug shape in the whole
   // UI. `$('missingId').onclick = fn` at top level throws a TypeError, which

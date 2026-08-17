@@ -1,0 +1,39 @@
+<!--
+  Campaign results. Included by ui/Index.html.
+
+  Deliberately leads with reply rate and puts open rate last, with its caveat
+  attached rather than in a footnote. Open rate is the number people ask for
+  and the least trustworthy one on the page — showing it first would make the
+  whole dashboard misleading by layout alone.
+-->
+<div class="card">
+  <h2><span class="num">▦</span> All campaigns</h2>
+  <div class="hint">
+    Every rate is against <strong>delivered</strong>, not against the imported
+    list — otherwise an unsent backlog quietly drags every number down.
+  </div>
+  <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+    <button id="btnRefreshResults" class="secondary">Refresh</button>
+    <button id="btnExportAll" class="secondary">Export all campaigns (CSV)</button>
+  </div>
+  <div id="resultsStatus" class="msg"></div>
+  <div class="scrollx" style="margin-top:12px">
+    <div id="allCampaignsTable">Loading…</div>
+  </div>
+</div>
+
+<div class="card">
+  <h2><span class="num">◉</span> One campaign in detail</h2>
+  <div class="cols">
+    <div>
+      <label>Campaign</label>
+      <select id="resultsCampaign"></select>
+    </div>
+    <div style="padding-top:26px">
+      <button id="btnLoadResults">Show results</button>
+      <button id="btnExportOne" class="secondary">Export this campaign (CSV)</button>
+    </div>
+  </div>
+  <div id="oneResultStatus" class="msg"></div>
+  <div id="oneResult" style="margin-top:14px"></div>
+</div>

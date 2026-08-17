@@ -514,6 +514,16 @@ function pollDueJobs(email, secret) {
     if (!isSeedRecipientId_(q.recipient_id)
       && (recipient.status === 'suppressed' || isSuppressed_(recipient.email))) return null;
 
+    // Minted at hand-out, not at queue time, and persisted so an open weeks
+    // later still resolves. Generated here rather than on the agent because
+    // the tracking endpoint has to look it up centrally — an id the agent
+    // invented and never reported would record nothing.
+    let trackingId = q.tracking_id;
+    if (!trackingId && (TRACK_OPENS || TRACK_CLICKS) && !isSynthetic) {
+      trackingId = newTrackingId_();
+      updateRow_('Queue', q.id, { tracking_id: trackingId });
+    }
+
     return {
       queueId: q.id,
       campaign: campaign,
@@ -521,6 +531,7 @@ function pollDueJobs(email, secret) {
       idempotencyKey: q.idempotency_key,
       senderDisplayName: sender.display_name,
       skipSendWindow: isSynthetic,
+      trackingId: trackingId || '',
     };
   }).filter(Boolean);
 }

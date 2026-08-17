@@ -16,7 +16,7 @@ const SCHEMA = {
   Recipients: ['id', 'campaign_id', 'email', 'first_name', 'last_name', 'company', 'title',
     'recipient_tz', 'custom', 'assigned_sender', 'status', 'status_reason', 'verify_status'],
   Queue: ['id', 'campaign_id', 'recipient_id', 'sender_email', 'due_at_utc', 'status',
-    'attempts', 'idempotency_key', 'sent_message_id', 'sent_at', 'error'],
+    'attempts', 'idempotency_key', 'sent_message_id', 'sent_at', 'error', 'tracking_id'],
   Signals: ['ts', 'sender_email', 'kind', 'gmail_message_id', 'in_reply_to', 'from_header',
     'matched_recipient_id'],
   Suppression: ['email', 'reason', 'source', 'added_at'],
@@ -49,6 +49,23 @@ const SCHEMA = {
   Delegations: ['id', 'claim_token', 'requested_by', 'delegator_email', 'days_requested',
     'reason', 'status', 'created_at', 'days_approved', 'approval_mode',
     'decided_at', 'revoked_by', 'revoked_at'],
+
+  /**
+   * Append-only open/click log — see gateway/Tracking.gs.
+   *
+   * Every row is one HTTP request from a mail client, not one human action:
+   * image prefetching means a single delivered message can produce several
+   * rows, or one from a machine that nobody ever read. Deliberately stores
+   * the raw events and leaves interpretation to the reporting layer, so a
+   * later change of mind about what counts as an "open" can be applied to
+   * history rather than only to new data.
+   *
+   * No IP address, by choice. The user agent is kept because it is what
+   * distinguishes a proxy prefetch from a person; an IP would add little and
+   * is personal data we have no reason to hold.
+   */
+  Tracking: ['ts', 'kind', 'campaign_id', 'recipient_id', 'sender_email',
+    'url', 'user_agent', 'machine_suspected'],
 };
 
 /** Bootstraps any missing tab with its header row. Idempotent — safe to call every deploy. */
@@ -78,6 +95,7 @@ const PRIMARY_KEY = {
   AccessGrants: 'email',
   Incidents: null,
   Delegations: 'id',
+  Tracking: null, // append-only event log
 };
 
 /** Global kill switch, checked by the agent every tick before it does anything else. */

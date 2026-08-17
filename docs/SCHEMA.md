@@ -74,6 +74,7 @@ Column order below is authoritative — `Store.gs` bootstraps headers from it an
 | `idempotency_key` | string | Agent refuses to send a key already marked `sent` |
 | `sent_message_id` | string | RFC `Message-ID`. Joined against `In-Reply-To` for reply matching. |
 | `sent_at`, `error` | | |
+| `tracking_id` | string? | Opaque per-send id for open/click tracking, minted at poll time and persisted so an open weeks later still resolves. Blank when tracking is off, and for seed and test sends. Never contains or encodes the recipient address. |
 
 ## `Signals`
 
@@ -174,3 +175,27 @@ themselves (`agent/Approve.gs`). The live capability it produces lives on the
 | `approval_mode` | enum? | `blanket` · `per_campaign` — the delegator's own choice of how much oversight they want. |
 | `decided_at` | datetime | |
 | `revoked_by` / `revoked_at` | | Either an admin (`revokeDelegation`) or the delegator themselves (`revokeOwnDelegation`). Both only ever shorten access. |
+
+## `Tracking`
+
+Append-only open/click log — see `gateway/Tracking.gs`. Written by an
+anonymously-reachable endpoint, so by design nothing here can do anything but
+append a row.
+
+Every row is one HTTP request from a mail client, **not** one human action:
+image prefetching means a delivered message can produce several rows, or one
+from a machine nobody ever read. Raw events are stored and interpretation is
+left to `admin/Analytics.gs`, so a later change of mind about what counts as
+an "open" applies to history rather than only to new data.
+
+| Column | Type | Notes |
+|---|---|---|
+| `ts` | datetime | |
+| `kind` | enum | `open` · `click` |
+| `campaign_id`, `recipient_id`, `sender_email` | string | Resolved from `Queue.tracking_id`; never passed in the URL |
+| `url` | string | Click destination. Blank for opens. |
+| `user_agent` | string | Kept because it distinguishes a proxy prefetch from a person. Truncated to 300 chars. |
+| `machine_suspected` | boolean | Open arrived within `OPEN_MACHINE_WINDOW_SEC` of the send, i.e. almost certainly a prefetch. Reported separately, never folded into the headline. |
+
+No IP address is stored, by choice — it would add little and is personal data
+we have no reason to hold.

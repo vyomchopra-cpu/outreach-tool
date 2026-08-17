@@ -118,13 +118,22 @@ function processJob_(email, secret, job) {
     // MailApp fallback rfcMessageId is '' — reply matching is impossible for
     // that send, which is why campaigns stay single-touch while the Gmail API
     // is unavailable (see docs/GCP_CONSTRAINT.md).
+    // Tracking is injected here, after rendering and merging, so it operates
+    // on the final HTML and cannot be mangled by a merge tag. The plain-text
+    // part is deliberately left alone: rewriting bare URLs in it would show
+    // the recipient a long opaque redirect where a readable address used to
+    // be, and text-part clicks are not worth that.
+    const trackedHtml = job.trackingId
+      ? applyTracking_(rendered.html, job.trackingId, CENTRAL_WEBAPP_URL)
+      : rendered.html;
+
     const sent = sendMessage_({
       fromDisplayName: job.senderDisplayName,
       fromEmail: email,
       toEmail: job.recipient.email,
       replyTo: replyToAddress_(),
       subject: subject,
-      html: rendered.html,
+      html: trackedHtml,
       text: rendered.text,
     });
     callCentral_('reportSent', [email, secret, job.queueId, sent.rfcMessageId || '']);

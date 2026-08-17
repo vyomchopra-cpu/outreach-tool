@@ -183,6 +183,7 @@
       <button data-tab="compose" class="active">1 · Compose</button>
       <button data-tab="audience">2 · Audience</button>
       <button data-tab="launch">3 · Launch</button>
+      <button data-tab="results">Results</button>
       <button data-tab="health">Health</button>
       <button data-tab="access">Access</button>
       <button data-tab="ops">Operations</button>
@@ -194,6 +195,7 @@
   <div class="tab active" id="tab-compose"><?!= include_('ui/Compose') ?></div>
   <div class="tab" id="tab-audience"><?!= include_('ui/Audience') ?></div>
   <div class="tab" id="tab-launch"><?!= include_('ui/Launch') ?></div>
+  <div class="tab" id="tab-results"><?!= include_('ui/Results') ?></div>
   <div class="tab" id="tab-health"><?!= include_('ui/Health') ?></div>
   <div class="tab" id="tab-access"><?!= include_('ui/Access') ?></div>
   <div class="tab" id="tab-ops"><?!= include_('ui/Operations') ?></div>
@@ -708,6 +710,121 @@
     google.script.run.withSuccessHandler(function (r) {
       setMsg('monitorStatus', r.sent ? 'Sent — check the Chat space.' : 'Not sent — save a Chat webhook below first.', r.sent ? 'good' : 'warn');
     }).withFailureHandler(fail('monitorStatus')).sendTestAlert();
+  };
+
+  // ── results & export ──────────────────────────────────────────
+  function fmtPct(n) { return (n == null ? '—' : n + '%'); }
+
+  /**
+   * Apps Script serves this page in a sandboxed iframe where a normal
+   * download is blocked, so the CSV is handed over via a Blob opened in a new
+   * tab. Falls back to showing the text if the popup is blocked — better than
+   * a button that silently does nothing, which is what the first attempt did.
+   */
+  function downloadCsv(payload) {
+    try {
+      var blob = new Blob([payload.csv], { type: 'text/csv;charset=utf-8;' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url; a.download = payload.filename;
+      document.body.appendChild(a); a.click();
+      setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 1500);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function refreshAllResults() {
+    google.script.run.withSuccessHandler(function (rows) {
+      if (!rows.length) { $('allCampaignsTable').innerHTML = '<div class="empty">No campaigns yet.</div>'; return; }
+      $('allCampaignsTable').innerHTML = '<table class="mini">'
+        + '<tr><th>Campaign</th><th>Status</th><th>Sent</th><th>Replies</th>'
+        + '<th>Clicks</th><th>Opens (human)</th><th>Bounced</th><th>Opted out</th></tr>'
+        + rows.map(function (c) {
+            return '<tr><td>' + esc(c.name) + '</td><td>' + esc(c.status) + '</td>'
+              + '<td>' + c.sent + '</td>'
+              + '<td>' + c.replied + ' <span class="hint">' + fmtPct(c.replyRate) + '</span></td>'
+              + '<td>' + c.clickedUnique + ' <span class="hint">' + fmtPct(c.clickRate) + '</span></td>'
+              + '<td>' + c.openedHumanUnique + ' <span class="hint">' + fmtPct(c.humanOpenRate) + '</span></td>'
+              + '<td>' + c.bounced + '</td><td>' + c.unsubscribed + '</td></tr>';
+          }).join('') + '</table>';
+
+      $('resultsCampaign').innerHTML = rows.map(function (c) {
+        return '<option value="' + esc(c.id) + '">' + esc(c.name) + '</option>';
+      }).join('');
+    }).withFailureHandler(function (err) {
+      $('allCampaignsTable').innerHTML = '<div class="msg bad">' + esc(clean(err.message)) + '</div>';
+    }).allCampaignResults();
+  }
+  $('btnRefreshResults').onclick = refreshAllResults;
+  refreshAllResults();
+
+  $('btnExportAll').onclick = function () {
+    setMsg('resultsStatus', 'Building export…');
+    google.script.run.withSuccessHandler(function (p) {
+      var ok = downloadCsv(p); // call once — calling it twice would download twice
+      setMsg('resultsStatus', ok
+        ? 'Exported ' + p.rowCount + ' campaign(s) to ' + p.filename
+        : 'Could not start the download — allow pop-ups for this page and retry.',
+        ok ? 'good' : 'warn');
+    }).withFailureHandler(fail('resultsStatus')).exportAllCampaignsCsv();
+  };
+
+  $('btnExportOne').onclick = function () {
+    var id = $('resultsCampaign').value;
+    if (!id) { setMsg('oneResultStatus', 'Pick a campaign first.', 'bad'); return; }
+    setMsg('oneResultStatus', 'Building export…');
+    google.script.run.withSuccessHandler(function (p) {
+      var ok = downloadCsv(p);
+      setMsg('oneResultStatus', ok
+        ? 'Exported ' + p.rowCount + ' recipient(s) to ' + p.filename
+        : 'Could not start the download — allow pop-ups for this page and retry.',
+        ok ? 'good' : 'warn');
+    }).withFailureHandler(fail('oneResultStatus')).exportCampaignCsv(id);
+  };
+
+  $('btnLoadResults').onclick = function () {
+    var id = $('resultsCampaign').value;
+    if (!id) { setMsg('oneResultStatus', 'Pick a campaign first.', 'bad'); return; }
+    setMsg('oneResultStatus', 'Loading…');
+    google.script.run.withSuccessHandler(function (r) {
+      setMsg('oneResultStatus', '');
+      var t = r.totals, rt = r.rates;
+      var stats = ''
+        + '<div class="stat"><b>' + t.sent + '</b><span>delivered</span></div>'
+        + '<div class="stat"><b>' + t.replied + '</b><span>replies · ' + fmtPct(rt.replyRate) + '</span></div>'
+        + '<div class="stat"><b>' + t.clickedUnique + '</b><span>clicked · ' + fmtPct(rt.clickRate) + '</span></div>'
+        + '<div class="stat"><b>' + t.openedHumanUnique + '</b><span>opened, likely human · ' + fmtPct(rt.humanOpenRate) + '</span></div>'
+        + '<div class="stat"><b>' + t.bounced + '</b><span>bounced · ' + fmtPct(rt.bounceRate) + '</span></div>'
+        + '<div class="stat"><b>' + t.unsubscribed + '</b><span>opted out</span></div>';
+
+      var caveat = '<div class="hint" style="margin-top:10px">'
+        + t.openedUnique + ' recipient(s) registered an open in total, of which '
+        + (t.openedUnique - t.openedHumanUnique) + ' looked like automated image loading '
+        + 'rather than a person. Clicks and replies are the numbers to trust.</div>';
+
+      var links = r.topLinks.length
+        ? '<h4 style="margin:18px 0 0;font-size:12.5px">Most clicked links</h4><table class="mini">'
+          + r.topLinks.map(function (l) {
+              return '<tr><td>' + esc(l.url) + '</td><td>' + l.clicks + '</td></tr>';
+            }).join('') + '</table>'
+        : '';
+
+      var sample = r.rows.slice(0, 25).map(function (x) {
+        return '<tr><td>' + esc(x.email) + '</td><td>' + esc(x.company) + '</td>'
+          + '<td>' + esc(x.sendStatus) + '</td><td>' + esc(x.status) + '</td>'
+          + '<td>' + x.humanOpens + '</td><td>' + x.clicks + '</td></tr>';
+      }).join('');
+
+      $('oneResult').innerHTML = '<div class="stats">' + stats + '</div>' + caveat + links
+        + '<h4 style="margin:18px 0 0;font-size:12.5px">Recipients'
+        + (r.rows.length > 25 ? ' <span class="hint">(first 25 — export for all ' + r.rows.length + ')</span>' : '')
+        + '</h4>'
+        + '<div class="scrollx"><table class="mini">'
+        + '<tr><th>Email</th><th>Company</th><th>Send</th><th>Status</th><th>Opens</th><th>Clicks</th></tr>'
+        + sample + '</table></div>';
+    }).withFailureHandler(fail('oneResultStatus')).campaignResults(id);
   };
 
   // ── self-test ─────────────────────────────────────────────────

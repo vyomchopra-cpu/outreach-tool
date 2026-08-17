@@ -55,7 +55,19 @@ function jsonResponse_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
 
-/** A GET here means someone opened the URL in a browser out of curiosity — not an error. */
+/**
+ * doGet serves the tracking endpoints, and nothing else.
+ *
+ * These are fetched by strangers' mail clients with no Google session, which
+ * is why they live in this project rather than admin/ — this is the only
+ * deployment reachable without authentication. Neither can change any state
+ * beyond appending to the Tracking log; see gateway/Tracking.gs for the
+ * constraints they hold to.
+ */
 function doGet(e) {
+  if (isTrackingRequest_(e)) {
+    if (e.parameter.px) return handleTrackingPixel_(e);
+    return handleTrackedLink_(e);
+  }
   return HtmlService.createHtmlOutput('<p>This is a machine API endpoint (agent -> central). Nothing to see here.</p>');
 }
