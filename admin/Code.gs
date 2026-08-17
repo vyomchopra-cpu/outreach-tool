@@ -17,7 +17,35 @@
  */
 
 function doGet(e) {
-  const email = Session.getActiveUser().getEmail();
+  const email = currentUserEmail_();
+
+  /**
+   * Reachable by anyone in the domain, before the authorization check,
+   * BECAUSE the thing it diagnoses is the authorization check itself.
+   *
+   * Reveals nothing an unauthorized visitor does not already know — their own
+   * address, and whether we recognise it. Without it, "Not authorized" and
+   * "Google did not tell us who you are" are the same screen, and they need
+   * completely different fixes: one is a missing grant, the other is a
+   * browser signed into the wrong account.
+   */
+  if (e && e.parameter && e.parameter.whoami === '1') {
+    const grant = email ? isAccessGrantValid_(email.toLowerCase()) : false;
+    const listed = email ? ADMIN_ALLOWLIST.indexOf(email.toLowerCase()) !== -1 : false;
+    return HtmlService.createHtmlOutput(''
+      + '<div style="font-family:-apple-system,Arial,sans-serif;padding:20px;max-width:640px;line-height:1.6">'
+      + '<h3>Console access check</h3><ul>'
+      + '<li>Google reports you as: <strong>' + (email || '(nothing — this is the problem)') + '</strong></li>'
+      + '<li>Right domain: <strong>' + (email && email.toLowerCase().endsWith('@' + REPLY_TO_DOMAIN) ? 'yes' : 'NO') + '</strong></li>'
+      + '<li>On the permanent list: <strong>' + (listed ? 'yes' : 'no') + '</strong></li>'
+      + '<li>Has a time-boxed grant: <strong>' + (grant ? 'yes' : 'no') + '</strong></li>'
+      + '<li>Allowed in: <strong>' + (isAuthorizedAdmin_(email) ? 'YES' : 'no') + '</strong></li>'
+      + '</ul>'
+      + '<p style="color:#666;font-size:13px">If the first line is blank, your browser is signed '
+      + 'into more than one Google account. Open this in an incognito window with your work '
+      + 'account only. If it shows the right address but "Allowed in" is no, you need a grant '
+      + '— send this page to whoever runs the console.</p></div>');
+  }
 
   if (!isAuthorizedAdmin_(email)) {
     // Deliberately a dead end now. Delegators never come here — approving
@@ -84,10 +112,33 @@ function isAuthorizedAdmin_(email) {
   return isAccessGrantValid_(lower);
 }
 
+/**
+ * Who is actually using the console.
+ *
+ * getActiveUser ONLY, and deliberately never getEffectiveUser.
+ *
+ * This project is deployed executeAs USER_DEPLOYING, so getEffectiveUser is
+ * always the owner regardless of who is on the page. Falling back to it when
+ * getActiveUser comes back blank would silently promote every visitor to the
+ * owner's identity — full admin for anyone in the domain, with the audit log
+ * cheerfully recording the owner as the actor. A blank result must therefore
+ * DENY, never substitute. That asymmetry is the entire safety of running this
+ * project as its owner, and test/qa.mjs pins it.
+ *
+ * Within one Workspace domain Google resolves the accessing user normally, so
+ * blank should not occur — but "should not" is not a thing to bet an
+ * authorization check on.
+ */
+function currentUserEmail_() {
+  return Session.getActiveUser().getEmail();
+}
+
 /** Throws if the caller isn't an authorized admin — call at the top of every server function. */
 function requireAdmin_() {
-  const email = Session.getActiveUser().getEmail();
-  if (!isAuthorizedAdmin_(email)) throw new Error('Not authorized: ' + (email || 'unknown user'));
+  const email = currentUserEmail_();
+  if (!isAuthorizedAdmin_(email)) {
+    throw new Error('Not authorized: ' + (email || 'Google did not report who you are — try an incognito window, signed in with your work account only'));
+  }
   return email;
 }
 

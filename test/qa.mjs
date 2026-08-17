@@ -397,6 +397,33 @@ check('reply-to and unsubscribe addresses use the sender\'s own domain', () => {
   });
 });
 
+check('the admin console never resolves identity from the effective user', () => {
+  // The console runs executeAs USER_DEPLOYING so that Sheet access happens as
+  // the owner — which is what lets a colleague use it without being given raw
+  // access to the spreadsheet, and therefore without being able to edit
+  // sends_expire_at or the suppression list by hand.
+  //
+  // The price is that getEffectiveUser() is ALWAYS the owner. Using it for
+  // identity, or falling back to it when getActiveUser() is blank, would
+  // promote every visitor in the domain to full admin under the owner's name,
+  // with the audit log recording the owner as the actor. Blank must deny.
+  const manifest = JSON.parse(readFileSync('admin/appsscript.json', 'utf8'));
+  if (manifest.webapp.executeAs !== 'USER_DEPLOYING')
+    throw new Error('admin executeAs is "' + manifest.webapp.executeAs + '" — under USER_ACCESSING every console user needs Drive access to the Sheet, which hands them the ability to bypass every guard in the code');
+
+  readdirSync('admin').filter(f => f.endsWith('.gs')).forEach(f => {
+    const src = readFileSync(`admin/${f}`, 'utf8');
+    if (/getEffectiveUser\(/.test(src))
+      throw new Error(`admin/${f} calls getEffectiveUser() — under USER_DEPLOYING that is always the owner, so it cannot identify anyone`);
+  });
+
+  const code = readFileSync('admin/Code.gs', 'utf8');
+  const fn = code.match(/function requireAdmin_[\s\S]*?\n\}/);
+  if (!fn) throw new Error('requireAdmin_ not found');
+  if (!/throw new Error/.test(fn[0]))
+    throw new Error('requireAdmin_ does not throw — a blank or unknown identity must be denied, never allowed through');
+});
+
 check('the tracked-link endpoint is not an open redirect', () => {
   // This endpoint lives on script.google.com and takes a destination as a
   // parameter. Without a scheme check, anyone could hand out a Google-domain
@@ -830,10 +857,16 @@ check('agent/appsscript.json scopes are exactly the Tier B set, no more', () => 
   if (forbidden.length) throw new Error(`forbidden scope present: ${forbidden.join(', ')}`);
 });
 
-check('admin/appsscript.json webapp access is DOMAIN, executeAs USER_ACCESSING (agent traffic moved to gateway/, so DOMAIN can stay tight)', () => {
+check('admin/appsscript.json webapp access stays DOMAIN (agent traffic lives in gateway/, so it can stay tight)', () => {
   const manifest = JSON.parse(readFileSync('admin/appsscript.json', 'utf8'));
   if (manifest.webapp.access !== 'DOMAIN') throw new Error('access is ' + manifest.webapp.access + ' — should be DOMAIN now that doPost/agent traffic lives in gateway/ instead; see docs/ARCHITECTURE.md §2');
-  if (manifest.webapp.executeAs !== 'USER_ACCESSING') throw new Error('executeAs must stay USER_ACCESSING for Session.getActiveUser() to reflect the real human admin');
+  // executeAs deliberately no longer pinned here — it moved to USER_DEPLOYING
+  // and is pinned by its own check, together with the constraint that makes
+  // that safe (identity from getActiveUser only, blank denies). Under
+  // USER_ACCESSING every console user needed Drive access to the Sheet, which
+  // would have let them edit sends_expire_at and the suppression list by hand
+  // and bypass every guard in the code. See "the admin console never resolves
+  // identity from the effective user".
 });
 
 check('gateway/appsscript.json is executeAs USER_DEPLOYING + access ANYONE_ANONYMOUS, and carries no gmail.* scopes', () => {
